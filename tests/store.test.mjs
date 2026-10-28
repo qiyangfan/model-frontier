@@ -159,6 +159,21 @@ test("a suspicious collapse in row count is rejected instead of silently replaci
   assert.equal(store.view().sources.vals.count, 40);
   assert.equal(store.view().sources.vals.error, null);
 });
+test("a source narrowing its own scoring coverage is accepted, not treated as a partial download", async () => {
+  // AA 自 v5.0 起只对覆盖新基准套件的配置发布 Intelligence Index：载荷仍是 715 条，
+  // 有分的从 704 塌到 77。这是源站口径收缩，不是抓取不完整。
+  const roster = Array.from({ length: 715 }, (_, i) => ({
+    name: "Model " + i,
+    score: i < 704 ? 10 + i * 0.25 : null,
+  }));
+  await store.refreshAll({ aa: async () => ({ rows: roster }) });
+  assert.equal(store.view().sources.aa.count, 715);
+  const narrowed = roster.map((r, i) => (i < 77 ? r : { ...r, score: null }));
+  await store.refreshAll({ aa: async () => ({ rows: narrowed }) });
+  assert.equal(store.view().sources.aa.count, 715);
+  assert.equal(store.view().sources.aa.stale, false);
+  assert.equal(store.view().sources.aa.error, null);
+});
 test("Vals refresh accepts the current table and clears a previous failure", async () => {
   await store.refreshSources(["vals"], {
     vals: async () => {

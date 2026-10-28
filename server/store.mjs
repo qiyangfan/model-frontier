@@ -104,8 +104,8 @@ function validScores(rows) {
     Number.isFinite(r.score),
   ).length;
 }
-// 抓取结果先过闸门再落库：格式合法但条数塌掉的响应（例如源站只下发当前模型、不下发历史
-// 配置）不会报错，静默收下会让榜单少掉一大批模型，因此按上次成功缓存比对。
+// 抓取结果先过闸门再落库：格式合法但载荷不完整的响应（例如源站只下发部分数据）不会
+// 报错，静默收下会让榜单少掉一大批模型，因此按上次成功缓存的载荷条数比对。
 async function refreshSource(id, fetcher) {
   progress.sources[id] = "loading";
   const attemptedAt = new Date().toISOString();
@@ -114,10 +114,14 @@ async function refreshSource(id, fetcher) {
     const valid = validScores(result.rows);
     if (valid < 5)
       throw new Error("源站数据异常：有效模型不足 5 条，拒绝替换缓存");
-    const before = validScores(state.sources[id]?.rows);
-    if (before >= 200 && valid < before / 2)
+    const before = state.sources[id]?.rows?.length ?? 0;
+    // 完整性按「源站下了多少条」比对，不按「其中有分的多少条」：AA 自 v5.0 起只对
+    // 覆盖新基准套件的配置发布 Intelligence Index，载荷本身仍然完整，用有分条数比对
+    // 会把这种源站口径收缩误判成抓取不完整。见 docs/adr/0018。
+    const rows = result.rows?.length ?? 0;
+    if (before >= 200 && rows < before / 2)
       throw new Error(
-        `源站数据疑似不完整：有效模型从 ${before} 条降为 ${valid} 条，拒绝替换缓存`,
+        `源站数据疑似不完整：模型配置从 ${before} 条降为 ${rows} 条，拒绝替换缓存`,
       );
     state.sources[id] = {
       ...result,

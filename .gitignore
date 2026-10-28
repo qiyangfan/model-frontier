@@ -8,6 +8,11 @@ data/arena-browser/
 .eslintcache
 coverage/
 
+# 本地排查产物与 IDE 配置；pnpm 锁文件是残留，本项目用 npm（package-lock.json）
+.diag/
+.idea/
+pnpm-lock.yaml
+
 # 榜单数据为摄取层落地缓存（ADR-0007）：刷新只写磁盘，不进版本控制
 data/snapshot.json
 data/history.json

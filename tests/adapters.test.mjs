@@ -8,6 +8,7 @@ import {
   ARENA_FORMAT,
   aaManifest,
   decryptAAGzip,
+  aaIndexVersion,
   parseAA,
   parseArena,
   parseVals,
@@ -68,6 +69,18 @@ const filler = (n) =>
     medianTimeToFirstTokenSeconds: 0.5,
     modelCreatorName: "Creator",
   }));
+test("AA index version is recorded because v4.3.2 and v5.0 scores are not comparable", () => {
+  assert.equal(
+    aaIndexVersion('x"name":"Artificial Analysis Intelligence Index v5.0"y'),
+    "Intelligence Index v5.0",
+  );
+  // 更新日志里的简称「Updated to Intelligence Index v5」不是版本标签
+  assert.equal(
+    aaIndexVersion('"description":"Updated to Intelligence Index v5"'),
+    null,
+  );
+  assert.equal(aaIndexVersion("<h1>challenge</h1>"), null);
+});
 test("AA manifest ingestion retains full precision, cost, effort, history and openness", async () => {
   const restore = serveAA(
     seal([

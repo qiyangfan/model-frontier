@@ -94,6 +94,14 @@ const MANIFEST_RE =
   /manifest\\?":\{\\?"path\\?":\\?"([^"\\]+)\\?",\\?"key\\?":\\?"([0-9a-fA-F]+)\\?"\}/;
 const AA_MIN_ROWS = 100;
 const AA_OPEN_FLAG_RATIO = 0.9;
+// 指数版本决定分数口径：v4.3.2 与 v5.0 的基准集不同，跨版本不可比。匹配带全称的标题
+// 形式，避开更新日志里 "Updated to Intelligence Index v5" 的简称。
+const AA_INDEX_VERSION_RE =
+  /Artificial Analysis Intelligence Index v(\d+(?:\.\d+)?)/;
+export function aaIndexVersion(html) {
+  const version = AA_INDEX_VERSION_RE.exec(String(html))?.[1];
+  return version ? `Intelligence Index v${version}` : null;
+}
 export function aaManifest(html) {
   const m = MANIFEST_RE.exec(String(html));
   if (!m) throw new Error("AA 页面结构变化：找不到数据清单 manifest");
@@ -614,12 +622,13 @@ async function getBuffer(url, timeout = SOURCE_TIMEOUT) {
 async function fetchAA() {
   const html = await getText(SOURCE_INFO.aa.url);
   const { path, key } = aaManifest(html);
-  return parseAA(
+  const parsed = parseAA(
     await decryptAAGzip(
       await getBuffer(new URL(path, SOURCE_INFO.aa.url)),
       key,
     ),
   );
+  return { ...parsed, sourceDate: aaIndexVersion(html) };
 }
 // Arena 文本总榜使用官方单文件快照，避免依赖页面渲染或不稳定的筛选服务。
 export const ARENA_FORMAT = "arena-text-overall-v1";
