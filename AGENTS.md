@@ -36,7 +36,7 @@ npm run format:check  # Prettier 检查
 ## 已知坑
 
 - **antd Drawer 竞态**：`HistoryDrawer` 只在打开瞬间重置内容，关闭时清空会让抽屉在滑出动画中闪成空状态。改这块前先读该文件注释。
-- **ECharts 滚轮**：图表边界用 capture 拦截 stopPropagation 且绝不 preventDefault，保页面原生滚动。
+- **ECharts 滚轮**：ECharts 6 的共享 RoamController 滚轮一到绘图区就先 `stop()` 再按 per-zoom 标志取舍，因此滚轮分工在 `Chart.jsx` 的边界 capture 监听分流：普通滚轮 `stopPropagation` 保页面原生滚动（绝不 preventDefault）；⌘/Ctrl + 滚轮与触控板捏合（合成 Ctrl 滚轮）`preventDefault` 接管浏览器页面缩放后放行，由 inside dataZoom 的 `zoomOnMouseWheel: true` 双轴缩放。echarts 6.1 的 `'ctrl'` 绑定只映射 `ctrlKey` 不认 ⌘，门控判定在 `src/chartNav.mjs`。
 - **exhaustive-deps 豁免**：`qualityStamp` 是 sources excluded 状态的指纹，代替整对象身份；`shareTarget` 的依赖列表逐一枚举其输入。动这些代码前先理解为何豁免。
 - **Tailwind 与残余 CSS 层叠**（ADR-0005）：样式在 JSX 工具类 + `src/style.css` 残余层。三条铁律：一，**禁止用工具类覆盖 antd 组件内部样式**——antd 运行时注入的 `.anticon{color:inherit}` 等无层规则恒胜层内工具类，需要覆盖 .ant-* 时写进残余层；二，`@import "tailwindcss/..."` 必须保持字符串形式，stylelint 已强制 `import-notation: "string"`——url() 记法会让 Tailwind 解析器静默不展开，产物里零工具类；三，**响应式断点只用自定义变体 `max-1180` / `max-1000` / `max-760`**（`@custom-variant` 定义为含边界 `width <= Npx`），禁止内置 `max-[Npx]:`——它编译为严格小于，与残余层媒体查询相差 1px 边界。
 - **E2E 锚点类**：`budget-note`、`chart-legend`、`chart-stage`、`compare-facts`、`compare-selector`、`configuration-evidence`、`creator-chip`、`leader-row`、`model-link`、`preset-cards`、`ranking-intro`、`ranking-main-table`、`ranking-table`、`scoring-context`、`search-hint`、`source-card` 等类名被三套 E2E 的 `locator()` 直接引用，重构样式时必须原样保留（可与工具类共存）。

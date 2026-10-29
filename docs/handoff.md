@@ -1,8 +1,37 @@
 # Handoff
 
-最后更新：2026-10-20。**最新一轮：主榜新增 10 个有效对手门槛，低样本模型保留原始战绩但不赋名次/前沿；已完成单测、覆盖率、构建与三套 E2E；提交与 CI 终态以版本库和 GitHub Actions 为准。** 以下“最新一轮”优先于后面的历史记录。
+最后更新：2026-10-30。**最新一轮：前沿图新增 ⌘/Ctrl + 滚轮双轴缩放（触控板 / 触屏捏合同路），普通滚轮仍保页面滚动；已完成单测、覆盖率、构建与夹具三套 E2E，尚未提交，4317 仍是旧构建。** 以下“最新一轮”优先于后面的历史记录。
 
-## 最新一轮：主榜最低有效对手门槛（2026-10-20）
+## 最新一轮：前沿图修饰键滚轮缩放（2026-10-30）
+
+### 决策与证据
+
+- 普通滚轮在 `Chart.jsx` 边界 capture 监听里 `stopPropagation`（页面原生滚动，绝不 preventDefault）；⌘/Ctrl + 滚轮与触控板捏合（合成 Ctrl 滚轮）`preventDefault` 接管浏览器页面缩放后放行给 ECharts。门控纯函数在 `src/chartNav.mjs` 的 `wheelZoomGate`——echarts 6.1 的 `'ctrl'` 绑定只映射 `ctrlKey` 不认 ⌘，分流只能在边界自己做。
+- 源码核实（echarts 6.1 `roams.js`）：共享 RoamController 只要存在 inside dataZoom 就挂 wheel/pinch 监听，且合并 opt 硬编码 `zoomOnMouseWheel: true`，per-zoom 标志是回调里逐模型检查的——旧代码注释「consumes wheel events before per-zoom flags are checked」与源码吻合。
+- 滚轮缩放双轴联动（横轴对数 / 纵轴 Elo 各加一个 inside 条目）；拖拽平移扩展为双轴；放大/缩小/重置按钮作用于双轴；横轴滑块保持不变，刻意不加纵轴滑块（简单优先）。规格已并入 `openspec/specs/ranking/spec.md`（Requirement: 前沿图修饰键滚轮缩放），变更归档于 `openspec/archive/2026-10-30-chart-modifier-wheel-zoom/`。属交互层改动，不涉口径/契约/架构，无 ADR。
+- 起草时「触屏端无变化」的预判被源码推翻：触屏双指捏合此前被 per-zoom 标志关闭而无动作，本次随 `zoomOnMouseWheel: true` 一并启用缩放；提案已按实际行为勘误后归档。
+
+### 实现位置
+
+- `src/chartNav.mjs`（新）：`wheelZoomGate` / `isZoomed` / `scaledRange` 纯函数；`tests/chartnav.test.mjs`（新）覆盖四种滚轮形态、任一轴已缩放判定与夹取边界。
+- `src/Chart.jsx`：边界监听改门控（`passive: false` 才能preventDefault）；dataZoom 增纵轴 inside 条目，窗口经 `previousY`（`dataZoom[1]`）跨重绘保存；`zoomed` 状态按任一轴判断；放大/缩小按钮 batch 逐轴派发；重置沿用「不带 dataZoomIndex 命中全部组件」语义零改动；说明文案更新；tooltip 去「横轴」字样。
+- `AGENTS.md`「ECharts 滚轮」条目与 `README.md` 图表交互节改写为新契约；`docs/three-board-workbench.md`、`docs/selection-efficiency.md` 是历史轮次验收记录，不改写历史。
+
+### 验证证据（2026-10-30 本机）
+
+- 单测 145/145；覆盖率行 98.80 / 分支 91.89 / 函数 97.38（门禁 92 / 85 / 90）；ESLint、Stylelint、Prettier、`vite build` 全绿。
+- 夹具三套 E2E（`npm run test:e2e:fixture`，自起 4318）全部通过，pageErrors / errors 为空；既有断言「普通滚轮必须滚动页面而非缩放图表」原样通过。
+- 返工两轮：scaledRange 期望值算错（1.5+2.1≠4.8）与浮点逐位比较（`3*1.4` 不精确）均由单测抓出并改为容差断言。
+
+### 给下一棒的坑
+
+- **`dispatchAction` dataZoom 不带 `dataZoomIndex` 命中全部组件**（`findEffectedDataZooms` 无 index 时查询全部，再按同轴联动补齐）——重置靠这个零改动覆盖纵轴；放大/缩小按钮则显式 batch `dataZoomIndex: 0/1` 逐轴以各自中点缩放，不能共用无 index 派发（否则纵轴会被横轴窗口覆盖）。
+- **边界监听必须 `passive: false`**：修饰键分支要 `preventDefault` 接管浏览器页面缩放；元素级 wheel 监听默认非 passive，改回 true 会让捏合/⌘滚轮叠加页面缩放。
+- **纵轴窗口存在 `dataZoom[1]`**，滑块移到 `[2]`：按 index 取窗口的代码（`dataZoom[0]` 横轴、`[1]` 纵轴）与数组顺序耦合，改 dataZoom 数组顺序必须同步这两处读取。
+- **窗口计算有浮点乘法**：`scaledRange` 的测试用容差断言（`assertClose`），新增用例不要写 `deepStrictEqual` 逐位比较。
+- **4317 服务仍是旧构建**：本次验证走 fixture 路径（4318），要看真实数据表现需按 `AGENTS.md` 流程重启 4317。
+
+## 上一轮：主榜最低有效对手门槛（2026-10-20）
 
 ### 决策与证据
 

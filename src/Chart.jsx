@@ -23,6 +23,7 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { costFormat, money, NAMES } from "./presentation.mjs";
+import { isZoomed, scaledRange, wheelZoomGate } from "./chartNav.mjs";
 echarts.use([
   ScatterChart,
   LineChart,
@@ -80,14 +81,16 @@ export default function Chart({
     const node = element.current;
     const chart = echarts.init(node);
     chartRef.current = chart;
-    // ECharts 6's shared RoamController consumes wheel events before per-zoom
-    // flags are checked. Keep native document scrolling by intercepting only
-    // propagation at this chart boundary, without ever preventing default.
-    const nativeScroll = (e) => e.stopPropagation();
-    node.addEventListener("wheel", nativeScroll, {
-      capture: true,
-      passive: true,
-    });
+    // ECharts 6 给每个坐标系挂共享 RoamController，滚轮一到绘图区就先 stop()
+    // 再按 per-zoom 标志取舍，悬停图表时页面滚动会被吞掉。滚轮分工在边界处分流：
+    // 普通滚轮拦在边界外保页面原生滚动（绝不 preventDefault）；⌘/Ctrl + 滚轮与
+    // 触控板捏合（合成 Ctrl 滚轮）preventDefault 接管浏览器页面缩放后放行，
+    // 由 inside dataZoom 的 zoomOnMouseWheel 触发双轴缩放。
+    const onWheel = (e) => {
+      if (wheelZoomGate(e) === "zoom") e.preventDefault();
+      else e.stopPropagation();
+    };
+    node.addEventListener("wheel", onWheel, { capture: true, passive: false });
     chart.on("click", (p) => {
       if (p.data?.id) callback.current(p.data.id);
     });
@@ -155,10 +158,9 @@ export default function Chart({
       retract = setTimeout(() => paintZone(null), 60);
     });
     chart.on("globalout", () => paintZone(null));
-    chart.on("datazoom", () => {
-      const z = chart.getOption().dataZoom?.[0];
-      setZoomed(z?.start > 0 || z?.end < 100);
-    });
+    chart.on("datazoom", () =>
+      setZoomed(isZoomed(chart.getOption()?.dataZoom)),
+    );
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     const fullscreen = () =>
@@ -166,7 +168,7 @@ export default function Chart({
     document.addEventListener("fullscreenchange", fullscreen);
     return () => {
       clearTimeout(retract);
-      node.removeEventListener("wheel", nativeScroll, true);
+      node.removeEventListener("wheel", onWheel, true);
       observer.disconnect();
       document.removeEventListener("fullscreenchange", fullscreen);
       chart.dispose();
@@ -280,7 +282,9 @@ export default function Chart({
       silent: true,
     });
     const esc = echarts.format.encodeHTML;
-    const previous = chart.getOption()?.dataZoom?.[0];
+    // [0]=横轴、[1]=纵轴缩放窗口；滑块在 [2]，随横轴联动不需保存
+    const previous = chart.getOption()?.dataZoom?.[0],
+      previousY = chart.getOption()?.dataZoom?.[1];
     chart.setOption(
       {
         animation: !matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -369,12 +373,24 @@ export default function Chart({
             type: "inside",
             xAxisIndex: 0,
             filterMode: "none",
-            zoomOnMouseWheel: false,
+            // 滚轮缩放的修饰键门控在 Chart.jsx 边界监听完成，这里放行即可
+            zoomOnMouseWheel: true,
             moveOnMouseWheel: false,
             moveOnMouseMove: true,
             preventDefaultMouseMove: true,
             start: previous?.start ?? 0,
             end: previous?.end ?? 100,
+          },
+          {
+            type: "inside",
+            yAxisIndex: 0,
+            filterMode: "none",
+            zoomOnMouseWheel: true,
+            moveOnMouseWheel: false,
+            moveOnMouseMove: true,
+            preventDefaultMouseMove: true,
+            start: previousY?.start ?? 0,
+            end: previousY?.end ?? 100,
           },
           {
             type: "slider",
@@ -470,21 +486,23 @@ export default function Chart({
     highlightIds,
     searchActive,
   ]);
+  // 不带 dataZoomIndex 的 dataZoom 动作命中全部缩放组件（含纵轴）
   const reset = () =>
     chartRef.current?.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
   const zoom = (direction) => {
-    const z = chartRef.current?.getOption().dataZoom?.[0];
-    if (!z) return;
-    const middle = (z.start + z.end) / 2;
-    const range = Math.min(
-      100,
-      Math.max(2, (z.end - z.start) * (direction === "in" ? 0.7 : 1.4)),
-    );
-    chartRef.current.dispatchAction({
-      type: "dataZoom",
-      start: Math.max(0, middle - range / 2),
-      end: Math.min(100, middle + range / 2),
-    });
+    const chart = chartRef.current;
+    if (!chart) return;
+    const batch = (chart.getOption()?.dataZoom ?? [])
+      .slice(0, 2)
+      .map((z, i) => {
+        const [start, end] = scaledRange(
+          z?.start ?? 0,
+          z?.end ?? 100,
+          direction === "in" ? 0.7 : 1.4,
+        );
+        return { dataZoomIndex: i, start, end };
+      });
+    if (batch.length) chart.dispatchAction({ type: "dataZoom", batch });
   };
   const save = () => {
     const chart = chartRef.current;
@@ -528,7 +546,7 @@ export default function Chart({
           ))}
         </div>
         <div className="chart-actions">
-          <Tooltip title="放大横轴">
+          <Tooltip title="放大">
             <Button
               aria-label="放大图表"
               type="text"
@@ -536,7 +554,7 @@ export default function Chart({
               onClick={() => zoom("in")}
             />
           </Tooltip>
-          <Tooltip title="缩小横轴">
+          <Tooltip title="缩小">
             <Button
               aria-label="缩小图表"
               type="text"
@@ -619,7 +637,7 @@ export default function Chart({
         <DragOutlined aria-hidden="true" className="text-[12px]" />
         <span>
           左上方更优。悬浮任一全球前沿模型，即标出它同时以更低成本、更高 PK
-          主积分支配的区域；拖动平移，按钮或滑块缩放，滚轮用于页面滚动
+          主积分支配的区域；拖动平移，⌘/Ctrl + 滚轮缩放，滚轮用于页面滚动
         </span>
       </div>
     </div>
