@@ -134,8 +134,11 @@ export default function Chart({
                   },
                   data: [
                     [
-                      { xAxis: row.cost, yAxis: context.yMin ?? 0 },
-                      { xAxis: context.axisMax, yAxis: row.composite },
+                      { xAxis: Math.log10(row.cost), yAxis: context.yMin ?? 0 },
+                      {
+                        xAxis: Math.log10(context.axisMax),
+                        yAxis: row.composite,
+                      },
                     ],
                   ],
                 }
@@ -204,7 +207,10 @@ export default function Chart({
     const point = (r) => ({
       id: r.id,
       name: r.name,
-      value: [r.cost, r.composite],
+      // x 轴数据取 log10 编码（轴为 value 轴）：dataZoom 的 percent 域是线性
+      // value 域，log 轴的视觉是 log 域，直接喂原始值会让平移/缩放在视觉上
+      // 变速变宽；编码后所有交互都落在 log 域，比例尺恒定。
+      value: [Math.log10(r.cost), r.composite],
       row: r,
       label: {
         show: r.frontier || r.openFrontier,
@@ -331,16 +337,19 @@ export default function Chart({
           selected: visibility,
         },
         xAxis: {
-          type: "log",
+          // log10 编码域（见 point()）：端点与刻度都按 10**v 反解成原始成本
+          type: "value",
           name: isRelative ? "相对成本（基准 1 倍）" : "每次任务成本（USD）",
           nameLocation: "middle",
           nameGap: 29,
           nameTextStyle: { color: "#657b8b", fontSize: 11 },
           axisLabel: {
-            formatter: (v) =>
-              isRelative
-                ? `${Number((v / 100).toPrecision(2))} 倍`
-                : `$${Number(v.toPrecision(2))}`,
+            formatter: (v) => {
+              const raw = 10 ** v;
+              return isRelative
+                ? `${Number((raw / 100).toPrecision(2))} 倍`
+                : `$${Number(raw.toPrecision(2))}`;
+            },
             color: "#81929f",
             fontSize: 10,
             hideOverlap: true,
@@ -349,8 +358,10 @@ export default function Chart({
           minorTick: { show: false },
           axisTick: { show: false },
           axisLine: { lineStyle: { color: "#dce5eb" } },
-          min: plot.length ? Math.min(...plot.map((r) => r.cost)) * 0.6 : 0.01,
-          max: axisMax,
+          min: plot.length
+            ? Math.log10(Math.min(...plot.map((r) => r.cost)) * 0.6)
+            : -2,
+          max: Math.log10(axisMax),
         },
         yAxis: {
           type: "value",

@@ -26,6 +26,8 @@
 ### 给下一棒的坑
 
 - **`dispatchAction` dataZoom 不带 `dataZoomIndex` 命中全部组件**（`findEffectedDataZooms` 无 index 时查询全部，再按同轴联动补齐）——重置靠这个零改动覆盖纵轴；放大/缩小按钮则显式 batch `dataZoomIndex: 0/1` 逐轴以各自中点缩放，不能共用无 index 派发（否则纵轴会被横轴窗口覆盖）。
+- **x 轴数据是 log10 编码 + value 轴（推 524a21c 后的缺陷修复）**：echarts dataZoom 的 percent 域是线性 value 域，log 轴视觉是 log 域——散点/前沿线/markArea 直接喂原始成本会让拖拽平移在视觉上变速变宽（owner 实测反馈「拖动时比例尺也变了」；旧代码同样存在，窗口大时感知剧烈）。修复：`point()` 编码 `Math.log10(cost)`、轴端点/刻度 formatter 按 `10**v` 反解、markArea xAxis 取 log10；修复后平移端点比值恒定（截图实证 143→143）。判据：拖拽前后「右端点值 ÷ 左端点值」不变。
+- **拖拽/滚轮链路的浏览器取证必须用受信任输入**（`keyboard.down("Control")` + `mouse.wheel`）：合成 `dispatchEvent(new WheelEvent(...))` 在该链路不生效（zrender 监听挂 canvas，RoamController 在 target 相位 stop() 终止传播）；元素坐标要先 `scrollIntoViewIfNeeded` 再取 `boundingBox`，否则探索页 canvas 在视口下方、鼠标事件全部落空（第一轮复现被这个污染过）。
 - **边界监听必须 `passive: false`**：修饰键分支要 `preventDefault` 接管浏览器页面缩放；元素级 wheel 监听默认非 passive，改回 true 会让捏合/⌘滚轮叠加页面缩放。
 - **纵轴窗口存在 `dataZoom[1]`**，滑块移到 `[2]`：按 index 取窗口的代码（`dataZoom[0]` 横轴、`[1]` 纵轴）与数组顺序耦合，改 dataZoom 数组顺序必须同步这两处读取。
 - **窗口计算有浮点乘法**：`scaledRange` 的测试用容差断言（`assertClose`），新增用例不要写 `deepStrictEqual` 逐位比较。
