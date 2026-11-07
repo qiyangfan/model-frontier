@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server/index.mjs --dev",
+    "dev": "NODE_USE_ENV_PROXY=1 node server/index.mjs --dev",
     "build": "vite build",
-    "start": "node server/index.mjs",
-    "refresh": "node server/refresh-cli.mjs",
+    "start": "NODE_USE_ENV_PROXY=1 node server/index.mjs",
+    "refresh": "NODE_USE_ENV_PROXY=1 node server/refresh-cli.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "node tests/e2e.mjs",
     "test:e2e:fixture": "node tests/e2e-fixture.mjs",
