@@ -1,8 +1,41 @@
 # Handoff
 
-最后更新：2026-10-30。**最新一轮：前沿图新增 ⌘/Ctrl + 滚轮双轴缩放（触控板 / 触屏捏合同路），普通滚轮仍保页面滚动；已完成单测、覆盖率、构建与夹具三套 E2E，尚未提交，4317 仍是旧构建。** 以下“最新一轮”优先于后面的历史记录。
+最后更新：2026-11-07。**最新一轮：Arena 数据源改走本地代理（HF 直连不通，且 Node 24 内置 fetch 默认不读 `http_proxy`/`https_proxy`，`NODE_USE_ENV_PROXY=1` 已入 npm 脚本与双击启动器），并新增「服务启动即全量刷新一次」。四站全绿验证通过，已提交推送。** 以下“最新一轮”优先于后面的历史记录。
 
-## 最新一轮：前沿图修饰键滚轮缩放（2026-10-30）
+## 最新一轮：Arena 源走本地代理 + 服务启动即全量刷新（2026-11-07）
+
+### 决策与证据
+
+- **根因**：Arena 数据源是 Hugging Face 官方 parquet 快照（`lmarena-ai/leaderboard-dataset`），本机直连 HF 不通而其余三站（AA / Vals / LiveBench）直连正常；Node 24 内置 `fetch()` 默认不读 `http_proxy`/`https_proxy`，所以即便 shell export 了代理，`fetchArena` 仍裸连报 `fetch failed`。经本地代理（`http://127.0.0.1:15732`）curl 与整套刷新均通。
+- **修法走环境开关、不加服务端代码**：`NODE_USE_ENV_PROXY=1`（Node ≥ 24 的 EnvHttpProxyAgent）让内置 fetch 尊重代理环境变量。`package.json` 的 `dev` / `start` / `refresh` 三脚本内置该开关（未设代理变量时行为与原来完全一致）；`启动模型前沿.command` 导出代理地址 + 开关 + `no_proxy`/`NO_PROXY=localhost,127.0.0.1`——回环豁免必须显式设，否则启动器里的 `/api/status` 探活 curl 会被代理劫持。用 `${http_proxy:-…}` 写法，shell 已有代理变量优先于脚本默认值。
+- **启动即刷新**：`server/index.mjs` 启动监听回调由「到期才刷」`refreshDue() ? refreshAll() : retryFailed()` 改为无条件 `refreshAll()`，日志打「正在执行启动刷新…」。仍受 `FRONTIER_AUTO_REFRESH=0` 闸门保护（夹具 E2E 与 CI 自起的 4318 服务用的正是它，确定性夹具路径零源站请求）；并发由 `runRefresh` 单飞守卫兜底（`running` 期间 60 秒定时器直接跳过）；单源失败走 `refreshSource` 既有缓存保留 + 退避重试，不污染数据。
+- **归档**：本轮为运维/基建改动，不触及量化口径、分享契约、架构（无 ADR）；刷新调度在 `openspec/specs/`（仅 ranking、share-link）无对应规格，`openspec/changes/` 无在途提案——本轮无可归档变更。
+
+### 实现位置
+
+- `package.json`：三脚本加 `NODE_USE_ENV_PROXY=1`。
+- `启动模型前沿.command`：导出代理与回环豁免（文件内中文注释说明缘由）。
+- `server/index.mjs`：启动无条件 `refreshAll()`。
+- `README.md`：自动更新语义改为「每次启动先全量刷一次」、新增 Arena 代理要求说明；`AGENTS.md` 已知坑新增 HF 代理条目、验证流程第 4 步注明重启即触发启动刷新。
+
+### 验证证据（2026-11-07 本机）
+
+- `NODE_USE_ENV_PROXY=1` + 代理环境下 `npm run refresh` 四站全绿（arena 419 / aa 726 / vals 34 / livebench 32）。
+- 单测 145/145；覆盖率行 98.80 / 分支 91.89 / 函数 97.38（门禁 92 / 85 / 90）；ESLint、Prettier、`vite build` 全绿；启动器 `zsh -n` 语法通过。
+- 夹具三套 E2E（`npm run test:e2e:fixture`，自起 4318、`FRONTIER_AUTO_REFRESH=0`）零错误，确认启动刷新不影响确定性夹具路径。
+- 4317 重启实测：日志出现「正在执行启动刷新…」，约 4 秒后 `/api/status` 四源全 `success`，`/api/data` 四源 fresh（arena 419，sourceDate 2026-10-28）。
+
+### 给下一棒的坑
+
+- **Node 内置 fetch 不读代理变量是版本行为**：`NODE_USE_ENV_PROXY=1` 需 Node ≥ 24；engines 只要求 ≥ 22.12，老 Node 机器上该开关不生效——届时要么升级 Node，要么在服务代码显式 `setGlobalDispatcher(new EnvHttpProxyAgent())`（未做，简单优先）。
+- **`no_proxy` 回环豁免别删**：启动器先 export 代理再跑 `/api/status` 探活，不豁免 127.0.0.1 的话探活请求会进代理，「已经运行」复用判断失效。
+- **启动刷新只看 `FRONTIER_AUTO_REFRESH`、不看刷新间隔设置**：「每次启动都刷」是 owner 点名语义；刷新间隔只管运行期 60 秒定时器的 `refreshDue()` 节奏。彻底关自动抓取仍用 `FRONTIER_AUTO_REFRESH=0`（手动 `/api/refresh` 仍可用）。
+- **代理地址变化时**：改 `启动模型前沿.command` 里的地址，或启动前自行 export 覆盖（`${var:-}` 语义，环境变量优先）。
+- **CI 不受影响**：runner 网络可直连 HF，`npm run refresh` 巡检照旧；PR 门禁仍走夹具（ADR-0014）。
+
+## 上一轮：前沿图修饰键滚轮缩放（2026-10-30）
+
+> 后记（2026-11-07）：本轮已随 524a21c / 0fbda67 提交并推送，4317 现运行新构建；下文「尚未提交 / 4317 仍是旧构建」的表述已过时。
 
 ### 决策与证据
 

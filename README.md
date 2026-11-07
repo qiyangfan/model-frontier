@@ -44,11 +44,13 @@ npm start
 
 ## 自动更新
 
-默认本地服务运行期间每 6 小时刷新，可在网页改为每小时、每天或关闭。启动时缓存到期会补更。无需 API key 或 Codex 会话。已有刷新间隔设置会保留。
+默认本地服务运行期间每 6 小时刷新，可在网页改为每小时、每天或关闭。每次启动都会先全量刷新一次，无需等缓存到期；个别源失败时保留缓存并按退避重试。无需 API key 或 Codex 会话。已有刷新间隔设置会保留。
 
 Arena 文本总榜取自官方 Hugging Face 数据集 `lmarena-ai/leaderboard-dataset` 的单文件 Parquet 快照（`text / latest / overall`，ADR-0013），提供人类盲测偏好评分、票数、区间与发布日期；不将其余分类重复计票。旧格式 Arena 缓存不作为成功观测，启动时会清理并重新获取。这里使用各站公开数据，并非承诺存在统一官方 API。
 
 四站均通过后台 HTTP 读取公开页面、内嵌结构化数据、CSV 与 Parquet。运行和定时刷新不依赖浏览器，不会启动 Chrome；源站拒绝时保留最后成功缓存并显示原因。服务关闭或电脑休眠时不继续刷新，下次运行补更。
+
+Arena 数据取自 Hugging Face，直连不可达的网络环境需经代理抓取：Node 内置 fetch 默认不读 `http_proxy` / `https_proxy`，须同时置 `NODE_USE_ENV_PROXY=1`。npm 脚本（`dev` / `start` / `refresh`）已内置该开关，双击启动器会自动导出本机代理地址；用终端自行启动时请先 `export http_proxy=… https_proxy=…` 再 `npm start`。
 
 数据目录可用 `FRONTIER_DATA_DIR` 覆盖，端口可用 `PORT` 覆盖（双击启动器固定 4317）；`FRONTIER_AUTO_REFRESH=0` 关闭自动源站刷新（供离线演示与确定性 E2E）。
 

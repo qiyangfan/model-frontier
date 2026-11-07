@@ -27,7 +27,7 @@ npm run format:check  # Prettier 检查
 1. `npm run test:coverage`（含门禁阈值）
 2. `npm run build`
 3. `npm run test:e2e:fixture`（在仓库内确定性夹具上跑三套 E2E，自起 4318 服务、不访问源站、不受实时数据漂移影响；与 CI 同一条数据路径）
-4. 需要看真实数据表现时，再重启 4317 服务手动核对（先 `lsof -ti :4317 -sTCP:LISTEN` 找到旧进程；注意 `kill` 需带 `-sTCP:LISTEN` 才能精确命中）
+4. 需要看真实数据表现时，再重启 4317 服务手动核对（先 `lsof -ti :4317 -sTCP:LISTEN` 找到旧进程；注意 `kill` 需带 `-sTCP:LISTEN` 才能精确命中）。重启即触发一次全量启动刷新，`/api/status` 的 `progress.sources` 全为 `success` 即数据就绪
 
 ## E2E 数据纪律
 
@@ -35,6 +35,7 @@ npm run format:check  # Prettier 检查
 
 ## 已知坑
 
+- **HF（Arena 源）本机直连不通**：Arena 数据从 Hugging Face 拉 parquet，须走本地代理；Node 24 内置 fetch 默认不读 `http_proxy`/`https_proxy`，`npm run dev/start/refresh` 已内置 `NODE_USE_ENV_PROXY=1` 开关，代理地址由 `启动模型前沿.command` 导出（含 `no_proxy` 回环豁免，防探活请求被代理劫持）。报 `fetch failed` 时第一嫌疑是这层，先 `NODE_USE_ENV_PROXY=1 http_proxy=… https_proxy=… npm run refresh` 活验。
 - **antd Drawer 竞态**：`HistoryDrawer` 只在打开瞬间重置内容，关闭时清空会让抽屉在滑出动画中闪成空状态。改这块前先读该文件注释。
 - **ECharts 滚轮**：ECharts 6 的共享 RoamController 滚轮一到绘图区就先 `stop()` 再按 per-zoom 标志取舍，因此滚轮分工在 `Chart.jsx` 的边界 capture 监听分流：普通滚轮 `stopPropagation` 保页面原生滚动（绝不 preventDefault）；⌘/Ctrl + 滚轮与触控板捏合（合成 Ctrl 滚轮）`preventDefault` 接管浏览器页面缩放后放行，由 inside dataZoom 的 `zoomOnMouseWheel: true` 双轴缩放。echarts 6.1 的 `'ctrl'` 绑定只映射 `ctrlKey` 不认 ⌘，门控判定在 `src/chartNav.mjs`。
 - **x 轴是 log10 编码的 value 轴**：echarts dataZoom 的 percent 域是线性 value 域，而 log 轴的视觉是 log 域——散点直接喂原始成本会让拖拽平移在视觉上变速变宽（比例尺漂移）。因此 `Chart.jsx` 的 `point()` 把成本编码为 `Math.log10(cost)`，轴端点与刻度 formatter 按 `10**v` 反解，斩杀区 markArea 的 `xAxis` 同样取 log10。改图表数据坐标前先理解这层编码，别把原始值直接喂回轴上。
