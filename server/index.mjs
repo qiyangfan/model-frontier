@@ -135,8 +135,10 @@ server.listen(PORT, "127.0.0.1", () => {
     console.log("自动源站刷新已禁用（FRONTIER_AUTO_REFRESH=0）");
     return;
   }
-  const task = refreshDue() ? refreshAll() : retryFailed();
-  task?.catch((e) => console.error(e.message));
+  // 每次启动无条件全量刷新一次；个别源失败时 refreshSource 会保留缓存并按退避重试，
+  // 60 秒定时器靠 progress.running 单飞守卫不会与本次刷新并发。
+  console.log("正在执行启动刷新…");
+  refreshAll().catch((e) => console.error(e.message));
 });
 const timer = autoRefresh
   ? setInterval(() => {
