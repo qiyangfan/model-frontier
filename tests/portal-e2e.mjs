@@ -66,6 +66,16 @@ try {
   );
   // 子串匹配「未入池」段头：不钉完整文案（段头措辞可能演进），只验证尾表存在
   await valueCard.getByText("未入池").waitFor();
+  // 编程优先视图（ADR-0022）：切换后榜单仍至少 1 行、名次徽章从 1 起；不钉编程名次，
+  // 不钉夹具的编程数据覆盖（重生成后可能变化）。点击用 exact 匹配段控标签——
+  // 编程视图说明文案里也含「综合性价比」字样，子串匹配会 strict 撞车
+  await valueCard.getByText("编程优先", { exact: true }).click();
+  assert.equal((await valueCard.locator(".leader-row").count()) >= 1, true);
+  assert.equal(
+    await valueCard.locator(".leader-row .rank-badge").first().textContent(),
+    "1",
+  );
+  await valueCard.getByText("综合性价比", { exact: true }).click();
   await page.goto(base + "/#stability?");
   await page
     .getByRole("heading", { name: "综合能力领先", exact: true })

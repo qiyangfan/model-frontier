@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -26,6 +26,7 @@ import { NAMES, COSTS, costFormat, money } from "./presentation.mjs";
 import {
   adjustedScores,
   certifyNoBrainer,
+  codingIndices,
   csvExport,
   valueRanking,
 } from "./analysis.mjs";
@@ -174,10 +175,20 @@ export function Overview({
     return {
       scored,
       cert: certifyNoBrainer(scored),
-      ranking: valueRanking(scored),
       hasInput: scored.rows.some((r) => Number.isFinite(r.adjusted)),
     };
   }, [analysis.rows]);
+  // 编程优先视图（ADR-0022）：LiveBench 编程/长程代理/浏览器三轴均分百分位。
+  // 视图切换不持久化——纯显示状态，与成本口径（跨会话语义）不同层级。
+  const [valueView, setValueView] = useState("composite");
+  const codingMap = useMemo(
+    () => codingIndices(analysis.rows),
+    [analysis.rows],
+  );
+  const ranking = useMemo(
+    () => valueRanking(verdict.scored, { view: valueView, coding: codingMap }),
+    [verdict, valueView, codingMap],
+  );
   // 加冕条件与 ADR-0019 单条推荐期一致：认证通过（λ 全区间 argmax 唯一）或池中仅剩
   // 唯一候选。未认证时榜单照常展示但第 1 名不加冕（ADR-0020：排序是信息展示，加冕才需要认证）。
   const crowned = verdict.cert.certified || verdict.cert.poolSize === 1;
@@ -321,6 +332,15 @@ export function Overview({
                 性价比首选
               </h2>
             </div>
+            <Segmented
+              value={valueView}
+              onChange={setValueView}
+              aria-label="性价比排序口径"
+              options={[
+                { label: "综合性价比", value: "composite" },
+                { label: "编程优先", value: "coding" },
+              ]}
+            />
           </div>
           {/* 调整分公式锚定综合相对成本指数（ADR-0019：costIndex 即 ADR-0003
               三站中位比几何平均）；单站成本口径下 r.cost 是原始美元价，
@@ -331,65 +351,80 @@ export function Overview({
             />
           ) : verdict.cert.poolSize > 0 ? (
             <>
-              <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
-                性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；四榜全部实测的模型进入正式排名，实测不全的按性价比续排在下方（无加冕资格）。
-              </p>
-              {verdict.cert.poolSize === 1 ? (
-                <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
-                  唯一通过四榜全量实测的候选，作为默认首选。
-                </p>
-              ) : verdict.cert.certified ? (
-                <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
-                  认证通过：「每贵一倍扣几分」从 0 调到
-                  40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健。
+              {valueView === "coding" ? (
+                <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
+                  按编程实测排序：LiveBench「编程 / 长程代理 /
+                  浏览器操作」三轴均分百分位，成本倍数并排展示；缺编程实测的模型排在末尾、以「—」标注。编程口径暂无市场斜率校准，不产出调整分——认证与「首选」仅在综合性价比排序。
                 </p>
               ) : (
-                <>
-                  <p className="m-0 mb-[8px] text-[12px] leading-[1.9] text-[#8a6a1f] max-760:text-[11px]">
-                    未认证：「每贵一倍扣几分」取值不同，首选就会不同——预算观感决定选择，不伪造单一答案；榜单第
-                    1 名不加首选标记。
-                  </p>
-                  <div className="mb-[12px]">
-                    {sweepRuns.map((run, i) => {
-                      const row = verdict.scored.rows.find(
-                        (r) => r.id === run.pick,
-                      );
-                      return (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
-                        >
-                          <span className="text-[#627987]">
-                            每贵一倍扣{" "}
-                            {run.from === run.to
-                              ? run.from
-                              : `${run.from}–${run.to}`}{" "}
-                            分
-                          </span>
-                          {row ? nameCell(row, onSelect) : <b>{run.pick}</b>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
+                <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
+                  性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；四榜全部实测的模型进入正式排名，实测不全的按性价比续排在下方（无加冕资格）。
+                </p>
               )}
-              {verdict.ranking.ranked.map((r, i) => (
+              {valueView === "composite" &&
+                (verdict.cert.poolSize === 1 ? (
+                  <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
+                    唯一通过四榜全量实测的候选，作为默认首选。
+                  </p>
+                ) : verdict.cert.certified ? (
+                  <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
+                    认证通过：「每贵一倍扣几分」从 0 调到
+                    40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健。
+                  </p>
+                ) : (
+                  <>
+                    <p className="m-0 mb-[8px] text-[12px] leading-[1.9] text-[#8a6a1f] max-760:text-[11px]">
+                      未认证：「每贵一倍扣几分」取值不同，首选就会不同——预算观感决定选择，不伪造单一答案；榜单第
+                      1 名不加首选标记。
+                    </p>
+                    <div className="mb-[12px]">
+                      {sweepRuns.map((run, i) => {
+                        const row = verdict.scored.rows.find(
+                          (r) => r.id === run.pick,
+                        );
+                        return (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
+                          >
+                            <span className="text-[#627987]">
+                              每贵一倍扣{" "}
+                              {run.from === run.to
+                                ? run.from
+                                : `${run.from}–${run.to}`}{" "}
+                              分
+                            </span>
+                            {row ? nameCell(row, onSelect) : <b>{run.pick}</b>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ))}
+              {ranking.ranked.map((r, i) => (
                 <div className="leader-row" key={r.id}>
                   <span
                     className={
-                      "rank-badge " + (i === 0 && crowned ? "first" : "")
+                      "rank-badge " +
+                      (i === 0 && crowned && valueView === "composite"
+                        ? "first"
+                        : "")
                     }
                   >
                     {i + 1}
                   </span>
                   {nameCell(r, onSelect)}
-                  {i === 0 && crowned ? (
+                  {i === 0 && crowned && valueView === "composite" ? (
                     <span className="flex-shrink-0 rounded-full border border-[#cfe6df] bg-[#e2f3ec] px-[9px] py-[2px] text-[10px] font-[650] text-[#0c806e]">
                       首选
                     </span>
                   ) : null}
                   <div className="leader-score">
-                    <b>{r.adjusted?.toFixed(0) ?? "—"}</b>
+                    <b>
+                      {valueView === "coding"
+                        ? (codingMap.get(r.id)?.toFixed(0) ?? "—")
+                        : (r.adjusted?.toFixed(0) ?? "—")}
+                    </b>
                     <small>
                       综合分 {number(r.composite)} · 成本{" "}
                       {costFormat(r.cost, "composite")}
@@ -397,12 +432,14 @@ export function Overview({
                   </div>
                 </div>
               ))}
-              {verdict.ranking.gatedOut.length ? (
+              {ranking.gatedOut.length ? (
                 <div className="mt-[10px] border-t border-line pt-[10px]">
                   <div className="mb-[4px] text-[10px] font-[650] tracking-[0.06em] text-[#7b958d]">
-                    未入池 · 实测不全（按性价比续排，无加冕资格）
+                    {valueView === "coding"
+                      ? "未入池 · 实测不全（按编程实测续排，无加冕资格）"
+                      : "未入池 · 实测不全（按性价比续排，无加冕资格）"}
                   </div>
-                  {verdict.ranking.gatedOut.map((r) => (
+                  {ranking.gatedOut.map((r) => (
                     <div
                       key={r.id}
                       className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
@@ -413,16 +450,20 @@ export function Overview({
                         {nameCell(r, onSelect)}
                       </span>
                       <span className="flex-shrink-0 tabular-nums text-[#627987]">
-                        {r.adjusted?.toFixed(0) ?? "—"} · 仅 {r.covered}/
-                        {analysis.sources.length} 榜实测
+                        {valueView === "coding"
+                          ? (codingMap.get(r.id)?.toFixed(0) ?? "—")
+                          : (r.adjusted?.toFixed(0) ?? "—")}{" "}
+                        · 仅 {r.covered}/{analysis.sources.length} 榜实测
                       </span>
                     </div>
                   ))}
                 </div>
               ) : null}
-              <p className="mt-[12px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
-                调整分 = 综合分 − 10·log2(成本指数/100)，成本指数 100=池中位。
-              </p>
+              {valueView === "composite" ? (
+                <p className="mt-[12px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
+                  调整分 = 综合分 − 10·log2(成本指数/100)，成本指数 100=池中位。
+                </p>
+              ) : null}
             </>
           ) : (
             <Empty

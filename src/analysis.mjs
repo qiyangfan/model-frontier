@@ -810,18 +810,63 @@ export function certifyNoBrainer(
   };
 }
 
+// ADR-0022：编程优先排序视图。编程分 = LiveBench「编程 / 长程代理 / 浏览器操作」三轴
+// 均分百分位（各轴相对有该轴实测的模型总体，与榜单百分位同刻度 0~100）；任一轴缺失
+// 即 null——未实测的终端操作能力不虚构。纯排序展示：编程口径无市场斜率校准，不产出
+// 调整分、不参与认证加冕。
+export function codingIndices(rows) {
+  const AXES = ["coding", "long_agentic", "browser"];
+  const pools = Object.fromEntries(
+    AXES.map((axis) => [
+      axis,
+      rows
+        .map((r) => r.representatives?.livebench?.suites?.[axis])
+        .filter(Number.isFinite),
+    ]),
+  );
+  const index = new Map();
+  for (const r of rows) {
+    const suites = r.representatives?.livebench?.suites;
+    const parts = AXES.map((axis) => {
+      const v = suites?.[axis];
+      return Number.isFinite(v) ? percentile(v, pools[axis]) : null;
+    });
+    index.set(
+      r.id,
+      parts.every(Number.isFinite)
+        ? parts.reduce((a, b) => a + b, 0) / parts.length
+        : null,
+    );
+  }
+  return index;
+}
+
 // ADR-0020：完整性价比榜单的排序与池外分组。榜内（入池，占名次、可加冕）与
 // 续排（池外，不占名次、无加冕资格）共用同一排序键：调整分降序，并列按综合分
 // 降序、名称升序，保证渲染次序确定（不随输入顺序漂移）。
 // 池外只收有输入（有调整分）的行——缺综合分或成本的模型本卡片无从评估，不在其列。
-export function valueRanking(scored) {
+// ADR-0022：view="coding" 时按编程分降序；缺编程分的沉到本段尾部（未实测不参与
+// 比较，也不消失——广度约束），彼此保持综合性价比序。
+export function valueRanking(
+  scored,
+  { view = "composite", coding = null } = {},
+) {
   const byAdjusted = (a, b) =>
     b.adjusted - a.adjusted ||
     b.composite - a.composite ||
     a.name.localeCompare(b.name);
-  const ranked = scored.rows.filter((r) => r.eligible).sort(byAdjusted);
+  const byCoding = (a, b) => {
+    const ca = coding?.get(a.id) ?? null;
+    const cb = coding?.get(b.id) ?? null;
+    if (ca == null && cb == null) return byAdjusted(a, b);
+    if (ca == null) return 1;
+    if (cb == null) return -1;
+    return cb - ca || byAdjusted(a, b);
+  };
+  const cmp = view === "coding" ? byCoding : byAdjusted;
+  const ranked = scored.rows.filter((r) => r.eligible).sort(cmp);
   const gatedOut = scored.rows
     .filter((r) => !r.eligible && r.adjusted != null)
-    .sort(byAdjusted);
+    .sort(cmp);
   return { ranked, gatedOut };
 }

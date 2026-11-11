@@ -427,6 +427,7 @@ test("csv export leaves the data time empty instead of throwing on a corrupted t
 import {
   adjustedScores,
   certifyNoBrainer,
+  codingIndices,
   valueRanking,
 } from "../src/analysis.mjs";
 test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；池资格 = 有输入 + 全量覆盖（无每榜短板线，ADR-0021）", () => {
@@ -701,5 +702,72 @@ test("valueRanking: 入池按调整分降序占名次，并列按综合分、名
   assert.deepEqual(
     gatedOut.map((r) => r.id),
     ["gatedHigh", "gated"],
+  );
+});
+
+test("codingIndices: LiveBench 编程/长程代理/浏览器三轴均分百分位；任一轴缺失即 null", () => {
+  const rows = [
+    {
+      id: "a",
+      representatives: {
+        livebench: { suites: { coding: 90, long_agentic: 70, browser: 80 } },
+      },
+    },
+    {
+      id: "b",
+      representatives: {
+        livebench: { suites: { coding: 80, long_agentic: 60, browser: 60 } },
+      },
+    },
+    {
+      // 缺 browser（未测的终端操作能力不虚构）→ 整体为 null
+      id: "c",
+      representatives: {
+        livebench: { suites: { coding: 70, long_agentic: 50 } },
+      },
+    },
+    { id: "d", representatives: {} },
+  ];
+  const m = codingIndices(rows);
+  assert.equal(m.get("c"), null);
+  assert.equal(m.get("d"), null);
+  const ia = m.get("a");
+  const ib = m.get("b");
+  assert.ok(Number.isFinite(ia) && Number.isFinite(ib));
+  assert.ok(ia > ib);
+});
+
+test("valueRanking: 编程视图——有编程分者按编程分降序在前，缺失者沉底保持综合序", () => {
+  const scored = {
+    rows: [
+      { id: "x", name: "x", eligible: true, adjusted: 1200, composite: 1200 },
+      { id: "y", name: "y", eligible: true, adjusted: 1100, composite: 1100 },
+      { id: "z", name: "z", eligible: true, adjusted: 1000, composite: 1000 },
+      { id: "g", name: "g", eligible: false, adjusted: 1050, composite: 1050 },
+    ],
+  };
+  // z 编程分最高但综合性价比垫底；y 缺编程分——广度约束下沉底而非消失（ADR-0022）
+  const coding = new Map([
+    ["x", 80],
+    ["z", 90],
+  ]);
+  const { ranked, gatedOut } = valueRanking(scored, { view: "coding", coding });
+  assert.deepEqual(
+    ranked.map((r) => r.id),
+    ["z", "x", "y"],
+  );
+  assert.deepEqual(
+    gatedOut.map((r) => r.id),
+    ["g"],
+  );
+  // 综合视图（缺省）不受影响
+  const compositeView = valueRanking(scored);
+  assert.deepEqual(
+    compositeView.ranked.map((r) => r.id),
+    ["x", "y", "z"],
+  );
+  assert.deepEqual(
+    compositeView.gatedOut.map((r) => r.id),
+    ["g"],
   );
 });
