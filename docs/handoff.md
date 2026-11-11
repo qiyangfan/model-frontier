@@ -391,3 +391,7 @@ npm run test:e2e && npm run test:portal && npm run test:evidence
 - `src/analysis.mjs` 评分、帕累托与来源组合队列（`coverageCohorts`；`dominatedBy` 在此计算，供斩杀区与 tooltip 共用）；`src/portal.mjs` 榜单行池、证据深度摘要与导出；`src/share.mjs` 分享链接编解码；`src/Evidence.jsx` 证据徽标。
 - `server/adapters.mjs` 三站摄取（AA 走 manifest 加密链路，见上）；`server/store.mjs` 抓取编排与落库闸门；`server/index.mjs` 单服务前后一体 + 定时抓取；`data/snapshot.json` 为聚合产物（已退出版本控制，ADR-0007）。
 - 规格在 `openspec/specs/<能力>/spec.md`；ADR 在 `docs/adr/`。
+
+### 追加迭代：编程优先排序视图（2026-11-11 深夜，ADR-0022）
+
+owner 授权「做任何有必要做的事」并给出约束「尽量以 coding 为准，但不能牺牲榜单广度」。数据事实：四榜仅 LiveBench 有能力分项（suites），代表行已随 aggregate 透传（API 零改动）；编程数据天然不全（池内也可能缺分项，缺 LiveBench 整榜者无编程数据——含综合分最高的 Fable 5.2）。设计（ADR-0022）：**同一榜单双排序切换**（「综合性价比 / 编程优先」Segmented，不持久化）——编程分 = LiveBench 编程/长程代理/浏览器操作三轴均分百分位（owner 场景：后端编码 + 长程代理 + 终端/浏览器操作）；**缺编程分沉底以「—」标注不消失**（广度硬约束的落地规则）；**不产出调整分、不加冕**（λ=10 校准对象是 composite 刻度不可平移，伪造校准违诚实性红线），「首选」徽章仅在综合排序显示。实测信息分化：编程第 1 = GPT-6 Astra（94），综合首选 Gemini 4 Carbon 编程轴第 3（87）。新增 `codingIndices`/`valueRanking` view 参数 + 单测两处 + portal-e2e 切换断言（exact 匹配段控标签——编程说明文案含「综合性价比」字样，子串匹配 strict 撞车，又一处文案-断言耦合教训）。扩摄取（AA 分项/Vals 编程基准）登记为未来选项未做。
