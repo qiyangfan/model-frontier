@@ -358,7 +358,8 @@ export function Overview({
                 </p>
               ) : (
                 <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
-                  性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；四榜全部实测的模型进入正式排名，实测不全的按性价比续排在下方（无加冕资格）。
+                  性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；实测不全的模型按缺榜数扣分（每缺一榜扣
+                  15 分，罚值经历史快照校准），覆盖见行内标注。
                 </p>
               )}
               {valueView === "composite" &&
@@ -428,40 +429,23 @@ export function Overview({
                     <small>
                       综合分 {number(r.composite)} · 成本{" "}
                       {costFormat(r.cost, "composite")}
+                      {r.covered < analysis.sources.length
+                        ? ` · ${r.covered}/${analysis.sources.length} 榜`
+                        : ""}
                     </small>
                   </div>
                 </div>
               ))}
-              {ranking.gatedOut.length ? (
-                <div className="mt-[10px] border-t border-line pt-[10px]">
-                  <div className="mb-[4px] text-[10px] font-[650] tracking-[0.06em] text-[#7b958d]">
-                    {valueView === "coding"
-                      ? "未入池 · 实测不全（按编程实测续排，无加冕资格）"
-                      : "未入池 · 实测不全（按性价比续排，无加冕资格）"}
-                  </div>
-                  {ranking.gatedOut.map((r) => (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
-                    >
-                      {/* 灰显名称与入池榜单区分；原因文字本身已是弱化色，
-                          不再叠 opacity 以免 12px 小字对比度不足 */}
-                      <span className="opacity-70">
-                        {nameCell(r, onSelect)}
-                      </span>
-                      <span className="flex-shrink-0 tabular-nums text-[#627987]">
-                        {valueView === "coding"
-                          ? (codingMap.get(r.id)?.toFixed(0) ?? "—")
-                          : (r.adjusted?.toFixed(0) ?? "—")}{" "}
-                        · 仅 {r.covered}/{analysis.sources.length} 榜实测
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              {ranking.excludedCount > 0 ? (
+                <p className="mt-[10px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
+                  其余 {ranking.excludedCount}{" "}
+                  个模型实测不足两榜或综合成本不足两源，暂无法评估性价比；源站补齐实测后自动入榜。
+                </p>
               ) : null}
               {valueView === "composite" ? (
                 <p className="mt-[12px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
-                  调整分 = 综合分 − 10·log2(成本指数/100)，成本指数 100=池中位。
+                  调整分 = 综合分 − 10·log2(成本指数/100) −
+                  15×缺榜数（缺榜罚分经历史快照校准）。
                 </p>
               ) : null}
             </>

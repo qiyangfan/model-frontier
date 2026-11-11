@@ -710,20 +710,24 @@ export function sourceAudit(models, modelId, source) {
   };
 }
 
-// ══════════ ADR-0019：成本调整综合分与无脑选决策层（池资格经 ADR-0021 改纯综合锚） ══════════
-// 调整分 = composite − λ·log2(costIndex/100)（costIndex: 100=池中位，ADR-0003 口径）。
-// 三公理：支配一致性（λ·log2 单调性定理保证，certify 内自检）、全量覆盖（4/4 榜有效实测
-// 才入池——未测榜单无强度证据，认证的全维度断言必须有完整证据集，ADR-0021 维持）、
-// 膝盖收敛（λ 扫描 argmax 不变性 = 最小最大遗憾解）。
-// ADR-0021 移除每榜短板线（原 ADR-0019「塌方门」，gatePct=40）：实证取值 0~50 认证与
-// 首选恒不变（只改池名单），且每榜否决权含 Vals 经济任务等与使用场景无关的专项轴——
-// 锚点错配，见 docs/adr/0021。floorPct 保留为描述字段（最弱已测榜百分位）。
+// ══════════ ADR-0019：成本调整综合分与无脑选决策层（准入与罚分经 ADR-0021/0023 演进） ══════════
+// 调整分 = composite − λ·log2(costIndex/100) − MISSING_BOARD_PENALTY×缺榜数。
+// ADR-0021 移除每榜短板线（原「塌方门」）：取值 0~50 认证与首选恒不变，且每榜否决权
+// 锚错专项。ADR-0023 移除 4/4 覆盖门、改为专项缺榜罚分：准入对齐天梯（≥2 榜有综合分
+// + 综合成本）；罚值 15 来自历史校准——34 条四源快照、12 次覆盖增长事件，每补一榜
+// 综合分漂移均值 −15.4（缺榜平均高估）、中位 ≈−3、|漂移| 中位 23.4（缺榜时大致在位，
+// 不确定性尾部大，见 docs/adr/0023）。floorPct 保留为描述字段。
 // 扫描取 6 个格点即精确：调整分对 λ 线性，上包络顶线更替只能发生在交叉点且必改变其所在
 // 区间端点的 argmax，故 [0,40] 连续区间内任何 argmax 更替都会在格点上显形，格点认证
 // 与连续认证等价、非近似。
 // λ=10：经三榜交叉 21 模型实测市场斜率 9.4±2.7/翻倍校准（2026-11-10，详见 docs/adr/0019）。
 
+// 缺榜专项罚分（综合分/每榜）：历史校准均值 |−15.4| 取整；独立于成本轴与 λ（证据罚
+// 不随预算观感缩放），见 docs/adr/0023。
+export const MISSING_BOARD_PENALTY = 15;
+
 export function adjustedScores(rows, { lambda = 10 } = {}) {
+  const boardCount = SCORE_SOURCES.length;
   const out = rows.map((r) => {
     const pct = Number.isFinite(r.composite)
       ? Object.values(r.percentiles ?? {}).filter(Number.isFinite)
@@ -731,16 +735,16 @@ export function adjustedScores(rows, { lambda = 10 } = {}) {
     const floorPct = pct.length ? Math.min(...pct) : null;
     const hasInput =
       Number.isFinite(r.composite) && Number.isFinite(r.cost) && r.cost > 0;
+    const missing = Math.max(0, boardCount - pct.length);
     const adjusted = hasInput
-      ? r.composite - lambda * Math.log2(r.cost / 100)
+      ? r.composite -
+        lambda * Math.log2(r.cost / 100) -
+        MISSING_BOARD_PENALTY * missing
       : null;
-    const complete = r.complete === true; // 缺字段按不完整处理：决策门宁缺毋滥（fail-closed）
-    const eligible = hasInput && complete;
+    const eligible = hasInput;
     const reason = !hasInput
-      ? (r.reason ?? "composite 或成本缺失，不入调整分")
-      : !complete
-        ? `仅 ${pct.length} 榜有效实测分，证据不全，不入正式排名`
-        : null;
+      ? (r.reason ?? "综合分或综合成本缺失，暂无法评估性价比")
+      : null;
     return {
       id: r.id,
       name: r.name,
@@ -749,7 +753,7 @@ export function adjustedScores(rows, { lambda = 10 } = {}) {
       cost: r.cost,
       floorPct,
       covered: pct.length,
-      complete,
+      complete: r.complete === true,
       adjusted,
       eligible,
       reason,
@@ -779,7 +783,11 @@ export function certifyNoBrainer(
     let pick = null;
     let value = -Infinity;
     for (const r of pool) {
-      const v = r.composite - lam * Math.log2(r.cost / 100);
+      // 分档扫描与排序键同构：含缺榜罚（罚为固定常量，不随 λ 缩放——证据罚与预算观感无关）
+      const v =
+        r.composite -
+        lam * Math.log2(r.cost / 100) -
+        MISSING_BOARD_PENALTY * Math.max(0, SCORE_SOURCES.length - r.covered);
       if (v > value) {
         value = v;
         pick = r.id;
@@ -841,11 +849,11 @@ export function codingIndices(rows) {
   return index;
 }
 
-// ADR-0020：完整性价比榜单的排序与池外分组。榜内（入池，占名次、可加冕）与
-// 续排（池外，不占名次、无加冕资格）共用同一排序键：调整分降序，并列按综合分
-// 降序、名称升序，保证渲染次序确定（不随输入顺序漂移）。
-// 池外只收有输入（有调整分）的行——缺综合分或成本的模型本卡片无从评估，不在其列。
-// ADR-0022：view="coding" 时按编程分降序；缺编程分的沉到本段尾部（未实测不参与
+// ADR-0020/0023：完整性价比榜单的单一排序。榜内（有综合分+成本，缺榜已罚）按
+// 调整分降序，并列按综合分降序、名称升序，渲染次序确定（不随输入顺序漂移）。
+// 无法评估的行（缺综合分或成本，如单榜模型）不入排序，仅返回数量供卡片披露——
+// 长尾逐个列出无信息量，也不构成任何排名主张。
+// ADR-0022：view="coding" 时按编程分降序；缺编程分的沉到尾部（未实测不参与
 // 比较，也不消失——广度约束），彼此保持综合性价比序。
 export function valueRanking(
   scored,
@@ -865,8 +873,6 @@ export function valueRanking(
   };
   const cmp = view === "coding" ? byCoding : byAdjusted;
   const ranked = scored.rows.filter((r) => r.eligible).sort(cmp);
-  const gatedOut = scored.rows
-    .filter((r) => !r.eligible && r.adjusted != null)
-    .sort(cmp);
-  return { ranked, gatedOut };
+  const excludedCount = scored.rows.length - ranked.length;
+  return { ranked, excludedCount };
 }

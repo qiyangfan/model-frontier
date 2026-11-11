@@ -430,30 +430,26 @@ import {
   codingIndices,
   valueRanking,
 } from "../src/analysis.mjs";
-test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；池资格 = 有输入 + 全量覆盖（无每榜短板线，ADR-0021）", () => {
+test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺榜数；准入 = 有综合分+成本（ADR-0023）", () => {
   const rows = [
     {
-      id: "mStrong",
-      name: "mStrong",
-      complete: true,
+      id: "mFull",
+      name: "mFull",
       composite: 1200,
       cost: 200,
-      percentiles: { vals: 90, livebench: 85, arena: 88 },
+      percentiles: { vals: 90, livebench: 85, arena: 88, aa: 86 },
     },
     {
       id: "mMedian",
       name: "mMedian",
-      complete: true,
       composite: 1100,
       cost: 100,
-      percentiles: { vals: 60, livebench: 55, arena: 58 },
+      percentiles: { vals: 60, livebench: 55, arena: 58, aa: 57 },
     },
     {
-      // 最低百分位 30 低于旧短板线 40，但四榜全测 → 入池（ADR-0021 移除每榜否决）；
-      // floorPct 保留为描述字段
-      id: "mLowFloor",
-      name: "mLowFloor",
-      complete: true,
+      // 缺 1 榜 → 专项罚 15（历史校准，ADR-0023）：1300 − 0 − 15 = 1285
+      id: "mPartial",
+      name: "mPartial",
       composite: 1300,
       cost: 100,
       percentiles: { vals: 95, livebench: 92, arena: 30 },
@@ -461,15 +457,21 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；池资格 =
   ];
   const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
-  // cost=200 → log2(2)=1 → 1200−10=1190
-  assert.equal(by.mStrong.adjusted, 1190);
-  // cost=100 → log2(1)=0 → 不罚不奖
+  // cost=200 → log2(2)=1 → 1200−10=1190（全测无缺榜罚）
+  assert.equal(by.mFull.adjusted, 1190);
+  // cost=100 → log2(1)=0 → 成本不罚不奖
   assert.equal(by.mMedian.adjusted, 1100);
-  assert.equal(by.mLowFloor.eligible, true);
-  assert.equal(by.mLowFloor.floorPct, 30);
-  // 缺 complete 字段 fail-closed：不入池
-  const noField = adjustedScores([{ ...by.mStrong, complete: undefined }]);
-  assert.equal(noField.rows[0].eligible, false);
+  // 缺 1 榜：1300 − 15×1 = 1285；floorPct 保留为描述字段
+  assert.equal(by.mPartial.adjusted, 1285);
+  assert.equal(by.mPartial.eligible, true);
+  assert.equal(by.mPartial.floorPct, 30);
+  assert.equal(by.mPartial.covered, 3);
+  // 无综合分/成本 → 无调整分、不入榜
+  const noInput = adjustedScores([
+    { id: "x", name: "x", composite: null, cost: null, percentiles: {} },
+  ]);
+  assert.equal(noInput.rows[0].adjusted, null);
+  assert.equal(noInput.rows[0].eligible, false);
   assert.equal(out.lambda, 10);
 });
 
@@ -555,16 +557,15 @@ test("certifyNoBrainer: 支配一致性违规可被检出（防公式回归）",
   assert.equal(cert.pick, "a");
 });
 
-test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达标也不入池", () => {
-  // 2026-11-11 裁定（ADR-0021 维持）：池成员资格要求全量榜单覆盖——未测榜单无强度证据；
-  // 覆盖选择性偏差（缺的榜可能是会暴露弱点的榜）使部分覆盖的 composite 与全量覆盖不可比
+test("adjustedScores: 缺榜专项罚分——部分覆盖模型入榜但按缺榜数扣分（ADR-0023）", () => {
+  // 准入对齐天梯（≥2 榜有综合分即可），缺榜不除名；罚值 15/榜经历史快照校准
+  // （12 次覆盖增长事件，均值 −15.4/榜），见 docs/adr/0023
   const rows = [
     {
       id: "partialStrong",
       name: "partialStrong",
       composite: 1300,
       cost: 20,
-      complete: false,
       percentiles: { vals: 96, livebench: 94 },
     },
     {
@@ -572,44 +573,28 @@ test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达�
       name: "fullOk",
       composite: 1100,
       cost: 100,
-      complete: true,
       percentiles: { vals: 70, livebench: 65, arena: 72, aa: 68 },
     },
   ];
   const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
-  // 已测维度 96/94 全部很高，仍因覆盖不全被拒，reason 诚实说明证据缺口
-  assert.equal(by.partialStrong.eligible, false);
-  assert.equal(by.partialStrong.floorPct, 94);
+  // 部分覆盖照常入榜；缺 2 榜扣 30：1300 + 10·log2(100/20)... = 1300 + 23.219 − 30
+  assert.equal(by.partialStrong.eligible, true);
   assert.equal(by.partialStrong.covered, 2);
-  assert.match(by.partialStrong.reason, /仅 2 榜/);
-  // 有输入 → 调整分照常产出（是否入池不影响调整分计算）
-  assert.equal(Number.isFinite(by.partialStrong.adjusted), true);
-  // fail-closed：complete 字段缺失按不完整处理
-  const noField = adjustedScores([
-    {
-      id: "x",
-      name: "x",
-      composite: 1200,
-      cost: 100,
-      percentiles: { vals: 90, livebench: 88 },
-    },
-  ]);
-  assert.equal(noField.rows[0].eligible, false);
-  assert.equal(noField.rows[0].complete, false);
-  // 全量覆盖 → 入池
-  assert.equal(by.fullOk.eligible, true);
-  assert.equal(by.fullOk.complete, true);
-  // 只有部分覆盖模型 → 池空，pick 为 null，不认证
-  const onlyPartial = certifyNoBrainer(
-    adjustedScores([rows[0]], { lambda: 10 }),
+  assert.equal(
+    by.partialStrong.adjusted,
+    1300 - 10 * Math.log2(20 / 100) - 15 * 2,
   );
-  assert.equal(onlyPartial.poolSize, 0);
-  assert.equal(onlyPartial.pick, null);
-  assert.equal(onlyPartial.certified, false);
+  // 全测无罚：1100 − 0 = 1100
+  assert.equal(by.fullOk.adjusted, 1100);
+  assert.equal(by.fullOk.covered, 4);
+  // 唯一候选 → 认证语义成立（poolSize=1）
+  const onlyOne = certifyNoBrainer(adjustedScores([rows[0]], { lambda: 10 }));
+  assert.equal(onlyOne.poolSize, 1);
+  assert.equal(onlyOne.certified, true);
 });
 
-test("valueRanking: 入池按调整分降序占名次，并列按综合分、名称兜底；池外只收有输入的行", () => {
+test("valueRanking: 缺榜罚分后统一排序，并列按综合分、名称兜底；无综合分/成本仅计数披露", () => {
   const full = { vals: 90, livebench: 85, arena: 88, aa: 82 };
   // c 与 d 调整分同为 1140（c: 1150−10·log2(2)，d: 1160−10·log2(4)）→ 综合分高者在前；
   // e1/e2 调整分与综合分双并列 → 名称兜底保证渲染次序确定（ADR-0020）
@@ -663,20 +648,18 @@ test("valueRanking: 入池按调整分降序占名次，并列按综合分、名
       percentiles: full,
     },
     {
-      // 池外续排用：覆盖不全（3/4），调整分 1300−10·log2(1)=1300
+      // 缺 1 榜罚 15（ADR-0023）：1300−15=1285，照常入榜
       id: "gated",
       name: "gated",
-      complete: false,
       composite: 1300,
       cost: 100,
       percentiles: { vals: 95, livebench: 92, aa: 80 },
     },
     {
-      // 池外续排用：覆盖不全（3/4）但调整分更高（1400−10·log2(2)=1390），
-      // 输入顺序故意排在 gated 之后，验证 gatedOut 也按同一排序键续排
+      // 缺 1 榜罚 15 但综合分更高：1400−20−15=1365；输入顺序故意排在 gated
+      // 之后，验证罚分后的完整排序确定性
       id: "gatedHigh",
       name: "gatedHigh",
-      complete: false,
       composite: 1400,
       cost: 200,
       percentiles: { vals: 95, livebench: 92, aa: 90 },
@@ -690,19 +673,17 @@ test("valueRanking: 入池按调整分降序占名次，并列按综合分、名
       percentiles: {},
     },
   ];
-  const { ranked, gatedOut } = valueRanking(
+  const { ranked, excludedCount } = valueRanking(
     adjustedScores(rows, { lambda: 10 }),
   );
-  // 输入顺序与名次无关，断言完整排序序列
+  // 准入 = 有综合分+成本（缺榜已罚）：gated(3/4,1300−15=1285) 与
+  // gatedHigh(3/4,1400−20−15=1365) 转正入榜；输入顺序与名次无关
   assert.deepEqual(
     ranked.map((r) => r.id),
-    ["a", "d", "c", "b", "e2", "e1"],
+    ["gatedHigh", "gated", "a", "d", "c", "b", "e2", "e1"],
   );
-  // 池外只收有调整分且覆盖不全的行，按调整分续排；无综合分/成本的行不收
-  assert.deepEqual(
-    gatedOut.map((r) => r.id),
-    ["gatedHigh", "gated"],
-  );
+  // 无综合分/成本的行不占名次，仅计入披露数量
+  assert.equal(excludedCount, 1);
 });
 
 test("codingIndices: LiveBench 编程/长程代理/浏览器三轴均分百分位；任一轴缺失即 null", () => {
@@ -751,23 +732,21 @@ test("valueRanking: 编程视图——有编程分者按编程分降序在前，
     ["x", 80],
     ["z", 90],
   ]);
-  const { ranked, gatedOut } = valueRanking(scored, { view: "coding", coding });
+  const { ranked, excludedCount } = valueRanking(scored, {
+    view: "coding",
+    coding,
+  });
   assert.deepEqual(
     ranked.map((r) => r.id),
     ["z", "x", "y"],
   );
-  assert.deepEqual(
-    gatedOut.map((r) => r.id),
-    ["g"],
-  );
+  // g 无入榜资格 → 仅计入披露数量
+  assert.equal(excludedCount, 1);
   // 综合视图（缺省）不受影响
   const compositeView = valueRanking(scored);
   assert.deepEqual(
     compositeView.ranked.map((r) => r.id),
     ["x", "y", "z"],
   );
-  assert.deepEqual(
-    compositeView.gatedOut.map((r) => r.id),
-    ["g"],
-  );
+  assert.equal(compositeView.excludedCount, 1);
 });
