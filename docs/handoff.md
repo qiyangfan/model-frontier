@@ -1,8 +1,25 @@
 # Handoff
 
-最后更新：2026-11-11。**最新一轮：「性价比首选」卡片改为完整性价比榜单（ADR-0020）——入池模型按 λ=10 调整分降序全量排名，认证语义从「是否出内容」收窄为「第 1 名是否加冕首选徽章」（未认证展示榜单但不加冕），池外模型灰显列「未入池」尾表逐行标注原因；算法与口径零改动。评审循环两轮修 3 项（文案语义、移动端隐式轨道、灰显承诺落地），已提交推送。** 以下“最新一轮”优先于后面的历史记录。
+最后更新：2026-11-11。**最新一轮：审查循环修复（b838dfe+c99de05 共 10 项）+ 四问体验裁定（ADR-0024）——性价比卡「仅开源 / 仅国产」快速筛选、帕累托探索范围新增「仅国产」（focus=cnOnly；闭源榜/国外榜实证零增量不配）、未认证态自适应压缩、编程视图行内百分位标注；融合排名、CSV、既有 API 字段零改动。验收全绿（coverage 行 98.9 / 分支 91.8 / 函数 97.5；夹具三套 E2E 连跑 7×3/3），已提交推送。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：性价比首选改为完整榜单（2026-11-11，ADR-0020）
+## 最新一轮：审查修复 + 四问体验裁定（2026-11-11，ADR-0024）
+
+### 决策与证据
+
+- **审查循环（范围 b838dfe+c99de05）三轮收敛修 10 项**：唯一候选/认证态/未认证态三处 ADR-0019 时代恒等式文案在罚分语义下已假（λ=0 argmax = max(composite−罚) ≠ composite 最高者；violations>0 而 sweep 同选使「取值不同首选不同」单因断言失真）、披露行因果穷举不完备（低样本/不连通路径）、ADR Fable 1541→1536（快照 mtime 早于提交，写 ADR 时数据已是 1536）、spec 同步、Empty 死分支+hasInput 字段删除、本文件两条已成假的坑（恒等式、complete fail-closed）在位修正。
+- **① 编程口径「成绩低」= 刻度错位感知**（编程分是 0-100 百分位，94=超越 94% 同测；综合口径是 ~1500 BT 分）——保留视图（owner 唯一在乎的专项锚点，池内 29/36 有编程分），行内 small 行加「编程百分位」前缀标注刻度。
+- **② 未认证标记块自适应**：sweep 全区间同选时区间表恒指向排序键第 1 名（键与 λ=10 档同构）零信息量 → 压缩为单行「未认证：缺榜罚分下证据不全」；分叉时才展开区间表（`sweepUnified` 判定）。
+- **③ 性价比卡快速筛选**：`CreatorChips` 泛化（label/chipPrefix/hint/chipClass/emptyNote props，默认值=主榜原行为；title 保持用 chip.value——主榜 label≠value 如 Google→Gemini）、`value-filter-chip` 锚类（`creator-chip` 被页级定位占用，混用必撞 strict）、`presentation.mjs` 国产厂商静态映射（小写归一；归属存疑如 Trillion Labs 不入表——保守偏差优于错误归类）+ `valueFilterPredicate`（open 严格 true，null 不算开源）、**adjustedScores 透传 openWeights**（原裁剪行缺此字段，chip 计数会恒 0——夹具审计逮住）、名次徽章保持全榜口径（筛后跳号是诚实呈现）、筛选空态文案指向真实交互。
+- **④ 帕累托探索范围配齐裁定（数据驱动）**：国产子集前沿有 3/4 成员为全球前沿独有（Kimi K3.1 Pro、MiMo V2.6 系）→ 配「仅国产」（focus 新增 `cnOnly` 值，share 白名单同步；`cnFrontierIds` 展示层派生自 pareto(plotted 国产)，不进 API/CSV——csvExport 固定列白名单实证不泄漏；Chart 加国产前沿线/图例/tooltip 态，斩杀区在子集视图禁绘）；**闭源前沿实证 4 成员全部在全球前沿上（独有 0）、国外榜同理与全球图重复 → 不配**。
+- **Muse Ember 质询裁定**（owner 联网查证配合）：发布于 2026-11-09 的新模型（TechCrunch/Meta 官方），本地数据（AA 36.02@$0.136 / Vals 60.48）与公开报道逐项吻合；历史重放自记录起点恒 frontier=true——全场最便宜端点（0.047 倍）不可被支配是 Pareto 几何必然，「廉价端点」非野鸡非黑马，前沿标签语义不改。
+
+### 实现位置与验证
+
+- `src/Portal.jsx`（CreatorChips 泛化 + 快筛 + sweepUnified + 百分位标注）、`src/main.jsx`/`src/Chart.jsx`（cnOnly + 国产前沿线）、`src/share.mjs`（FOCUS_VALUES + cnOnly）、`src/presentation.mjs`（国产映射 + valueFilterPredicate）、`src/analysis.mjs`（openWeights 透传）。
+- E2E 竞态修复（实证 1/3 概率触发）：①新 chips/cnOnly 断言点击后立即 count() 读到 React 提交前 DOM → waitForFunction 等定态；②既有 evidence-e2e 开关断言 reload 后立即 isChecked 读到偏好恢复前 false → 同法修复。**验证管道教训：`npm run … | grep -c; echo $?` 的 `$?` 是 grep 的退出码不是 npm 的——验收必须以 npm 自身退出码判定**（连跑 7×3/3 全绿）。
+- 归档：`openspec/archive/2026-11-11-value-quick-filter-cn-frontier/`；规格并入 ranking spec（快速筛选只改显示 / 未认证自适应 / 编程百分位 / 探索范围三值）；ADR 见 `docs/adr/0024`。
+
+## 上一轮：性价比首选改为完整榜单（2026-11-11，ADR-0020）
 
 ### 决策与证据
 
@@ -76,10 +93,10 @@ owner 随后三点追问（40 取值多方认证 / 认真评估 2/4 / 锚点不�
 
 - **非综合成本口径下 `r.cost` 是原始美元价**：任何新派生列都不得直接 `log2(cost/100)`；需要成本指数必须走综合口径或显式归一化（后者属口径变更须先写 ADR）。
 - **percentiles 是 0–100 刻度**：`percentileFraction` 分子含 `100n` 因子；别按 0–1 处理。
-- **认证态才有榜首，恒等式别破坏**：认证条件含 λ=0 档——去掉 λ=0 或改扫描起点，榜首就不再是「综合能力最强者」。
+- **认证态才有榜首，恒等式别破坏**：认证条件含 λ=0 档——去掉 λ=0 或改扫描起点，榜首恒等式就破坏（ADR-0023 起排序键含缺榜罚分，恒等式为「λ=0 档调整分最高者」，不再等于 composite 最高者）。
 - **`sweepRuns` 区间行按 pick 天然唯一**：上包络顶线更替随 λ 单调（凸包络斜率非降），同一模型不会两次登顶；若扫描结构改动需重证此性质。
 - **术语纪律**：用户可见文案禁「塌方 / λ / argmax」与内部文档编号引用（如「ADR-0019」，2026-11-11 实证泄漏三处已清）；代码注释与内部参数名（`lambda`）保留。审查文案时对照本清单全查，含文档编号。
-- **`adjustedScores` 对 `complete` 缺字段 fail-closed**：自造行喂函数必须显式 `complete: true`，否则全部不入池（测试夹具即如此）。
+- **`adjustedScores` 的 `complete` 只是描述字段（ADR-0023 起不再 gating）**：准入只看 composite+cost；自造行无需补 `complete: true`（旧版 fail-closed 行为已随覆盖门删除）。字段仍透传供其他卡片展示。
 
 ## 上一轮：Arena 源走本地代理 + 服务启动即全量刷新（2026-11-07）
 
