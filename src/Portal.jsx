@@ -194,7 +194,7 @@ export function Overview({
       cert: certifyNoBrainer(scored),
     };
   }, [analysis.rows]);
-  // 编程优先视图（ADR-0022）：LiveBench 编程/长程代理/浏览器三轴均分百分位。
+  // 编程优先视图（ADR-0022 经修订）：LiveBench 编程/长程代理/数据分析三轴均分百分位。
   // 视图切换不持久化——纯显示状态，与成本口径（跨会话语义）不同层级。
   const [valueView, setValueView] = useState("composite");
   const codingMap = useMemo(
@@ -399,7 +399,7 @@ export function Overview({
               {valueView === "coding" ? (
                 <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
                   按编程实测排序：LiveBench「编程 / 长程代理 /
-                  浏览器操作」三轴均分百分位，成本倍数并排展示；缺编程实测的模型排在末尾、以「—」标注。编程口径暂无市场斜率校准，不产出调整分——认证与「首选」仅在综合性价比排序。
+                  数据分析」三轴均分百分位，成本倍数并排展示；缺编程实测的模型排在末尾、以「—」标注。编程口径暂无市场斜率校准，不产出调整分——认证与「首选」仅在综合性价比排序。
                 </p>
               ) : (
                 <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">

@@ -820,12 +820,16 @@ export function certifyNoBrainer(
   };
 }
 
-// ADR-0022：编程优先排序视图。编程分 = LiveBench「编程 / 长程代理 / 浏览器操作」三轴
-// 均分百分位（各轴相对有该轴实测的模型总体，与榜单百分位同刻度 0~100）；任一轴缺失
-// 即 null——未实测的终端操作能力不虚构。纯排序展示：编程口径无市场斜率校准，不产出
-// 调整分、不参与认证加冕。
+// ADR-0022（经 2026-11-11 修订）：编程优先排序视图。编程分 = LiveBench「编程 / 长程代理 /
+// 数据分析」三轴均分百分位（后端编码三件套：算法编码 + 长任务代理 + 数据处理/SQL；与榜单
+// 百分位同刻度 0~100）；任一轴缺失即 null——未实测的能力不虚构。轴选型锚定 owner 后端场景：
+// browser（浏览器操作）与 design（文档/前端设计）不是后端专项，browser 曾被混入、实证对
+// 「强编码×未接浏览器」模型构成拖累/对「高浏览器×弱编码」模型构成抬升，双向失真，删；
+// reasoning 与 coding 秩相关仅 0.448（n=29）——它是通用轴而非后端代理，混入即镜头漂移回
+// 综合，拒。LiveBench suites 整包发布（7 轴覆盖恒一致），轴选择不产生额外置 null。
+// 纯排序展示：编程口径无市场斜率校准，不产出调整分、不参与认证加冕。
 export function codingIndices(rows) {
-  const AXES = ["coding", "long_agentic", "browser"];
+  const AXES = ["coding", "long_agentic", "data_analysis"];
   const pools = Object.fromEntries(
     AXES.map((axis) => [
       axis,

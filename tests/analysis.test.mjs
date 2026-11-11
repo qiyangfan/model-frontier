@@ -689,25 +689,30 @@ test("valueRanking: 缺榜罚分后统一排序，并列按综合分、名称兜
   assert.equal(excludedCount, 1);
 });
 
-test("codingIndices: LiveBench 编程/长程代理/浏览器三轴均分百分位；任一轴缺失即 null", () => {
+test("codingIndices: LiveBench 编程/长程代理/数据分析三轴均分百分位；任一轴缺失即 null", () => {
   const rows = [
     {
       id: "a",
       representatives: {
-        livebench: { suites: { coding: 90, long_agentic: 70, browser: 80 } },
+        livebench: {
+          suites: { coding: 90, long_agentic: 70, data_analysis: 80 },
+        },
       },
     },
     {
       id: "b",
       representatives: {
-        livebench: { suites: { coding: 80, long_agentic: 60, browser: 60 } },
+        livebench: {
+          suites: { coding: 80, long_agentic: 60, data_analysis: 60 },
+        },
       },
     },
     {
-      // 缺 browser（未测的终端操作能力不虚构）→ 整体为 null
+      // 缺数据分析轴（未实测的后端栈不虚构）→ 整体为 null；browser 轴即使有实测
+      // 也不参与编程分（非后端专项，ADR-0022 修订）
       id: "c",
       representatives: {
-        livebench: { suites: { coding: 70, long_agentic: 50 } },
+        livebench: { suites: { coding: 70, long_agentic: 50, browser: 90 } },
       },
     },
     { id: "d", representatives: {} },
