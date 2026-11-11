@@ -709,3 +709,110 @@ export function sourceAudit(models, modelId, source) {
     population: candidates.length,
   };
 }
+
+// ══════════ ADR-0019：成本调整综合分与无脑选决策层 ══════════
+// 调整分 = composite − λ·log2(costIndex/100)（costIndex: 100=池中位，ADR-0003 口径）。
+// 三公理：支配一致性（λ·log2 单调性定理保证，certify 内自检）、短板淘汰（任一榜单百分位
+// 低于下限即出局；术语源自 harness-bench「塌方门」，对外文案统一称「短板」——四张第三方
+// 榜单即四种测量体系，本门测的是各榜最低百分位的绝对下限而非分化幅度，2026-11-11 裁定
+// 见 docs/adr/0019 修订记录；另要求全量榜单覆盖——未测榜单无短板证据也无强度证据，认证的
+// 全维度断言必须有完整证据集）、膝盖收敛（λ 扫描 argmax 不变性 = 最小最大遗憾解）。
+// 扫描取 6 个格点即精确：调整分对 λ 线性，上包络顶线更替只能发生在交叉点且必改变其所在
+// 区间端点的 argmax，故 [0,40] 连续区间内任何 argmax 更替都会在格点上显形，格点认证
+// 与连续认证等价、非近似。
+// λ=10：经三榜交叉 21 模型实测市场斜率 9.4±2.7/翻倍校准（2026-11-10，详见 docs/adr/0019）。
+
+export function adjustedScores(rows, { lambda = 10, gatePct = 40 } = {}) {
+  const out = rows.map((r) => {
+    const pct = Number.isFinite(r.composite)
+      ? Object.values(r.percentiles ?? {}).filter(Number.isFinite)
+      : [];
+    const floorPct = pct.length ? Math.min(...pct) : null;
+    const hasInput =
+      Number.isFinite(r.composite) && Number.isFinite(r.cost) && r.cost > 0;
+    const adjusted = hasInput
+      ? r.composite - lambda * Math.log2(r.cost / 100)
+      : null;
+    const complete = r.complete === true; // 缺字段按不完整处理：决策门宁缺毋滥（fail-closed）
+    const floorOk =
+      hasInput && Number.isFinite(floorPct) && floorPct >= gatePct;
+    const eligible = floorOk && complete;
+    // reason 按「最具体的失败」优先：已测榜单存在短板比覆盖不足更能说明问题，即使两者同时成立
+    const reason = !hasInput
+      ? (r.reason ?? "composite 或成本缺失，不入调整分")
+      : !Number.isFinite(floorPct)
+        ? "无有效榜单百分位，短板无法评估"
+        : !floorOk
+          ? `最低榜单百分位 ${floorPct.toFixed(0)} 低于短板线 ${gatePct}，存在短板榜单，不入首选池`
+          : !complete
+            ? `仅 ${pct.length} 榜有效实测分，无法排除未测榜单的短板，不入首选池`
+            : null;
+    return {
+      id: r.id,
+      name: r.name,
+      creator: r.creator,
+      composite: r.composite,
+      cost: r.cost,
+      floorPct,
+      covered: pct.length,
+      complete,
+      adjusted,
+      eligible,
+      reason,
+    };
+  });
+  return { lambda, gatePct, rows: out };
+}
+
+export function certifyNoBrainer(
+  scored,
+  { lambdaList = [0, 2.5, 5, 10, 20, 40] } = {},
+) {
+  const { rows, lambda, gatePct } = scored;
+  const pool = rows.filter((r) => r.eligible);
+  const violations = [];
+  for (const a of pool) {
+    for (const b of pool) {
+      if (a.id === b.id) continue;
+      const dominates =
+        a.composite >= b.composite &&
+        a.cost <= b.cost &&
+        (a.composite > b.composite || a.cost < b.cost);
+      if (dominates && a.adjusted <= b.adjusted) violations.push([a.id, b.id]);
+    }
+  }
+  const sweep = lambdaList.map((lam) => {
+    let pick = null;
+    let value = -Infinity;
+    for (const r of pool) {
+      const v = r.composite - lam * Math.log2(r.cost / 100);
+      if (v > value) {
+        value = v;
+        pick = r.id;
+      }
+    }
+    return { lambda: lam, pick, value };
+  });
+  const counts = {};
+  for (const s of sweep) counts[s.pick] = (counts[s.pick] ?? 0) + 1;
+  const pick =
+    pool.length === 0
+      ? null
+      : Object.entries(counts).sort((x, y) => y[1] - x[1])[0][0];
+  const certified =
+    pool.length > 0 &&
+    violations.length === 0 &&
+    new Set(sweep.map((s) => s.pick)).size === 1;
+  return {
+    certified,
+    // 未认证时也返回多数档 pick：卡片明示「未认证」并展示 λ 区间图，由用户自选，
+    // 认证与否只改变展示文案，不隐藏答案来源（宪法第 1 条：不伪造单一答案）。
+    pick,
+    counts,
+    sweep,
+    violations,
+    poolSize: pool.length,
+    lambda,
+    gatePct,
+  };
+}

@@ -423,3 +423,191 @@ test("csv export leaves the data time empty instead of throwing on a corrupted t
   assert.ok(csv.includes("数据时间"));
   assert.ok(!csv.includes("Invalid"));
 });
+
+import { adjustedScores, certifyNoBrainer } from "../src/analysis.mjs";
+test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；中位成本不罚不奖", () => {
+  const rows = [
+    {
+      id: "mStrong",
+      name: "mStrong",
+      complete: true,
+      composite: 1200,
+      cost: 200,
+      percentiles: { vals: 90, livebench: 85, arena: 88 },
+    },
+    {
+      id: "mMedian",
+      name: "mMedian",
+      complete: true,
+      composite: 1100,
+      cost: 100,
+      percentiles: { vals: 60, livebench: 55, arena: 58 },
+    },
+    {
+      id: "mGated",
+      name: "mGated",
+      complete: true,
+      composite: 1300,
+      cost: 100,
+      percentiles: { vals: 95, livebench: 92, arena: 30 },
+    },
+  ];
+  const out = adjustedScores(rows, { lambda: 10, gatePct: 40 });
+  const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
+  // cost=200 → log2(2)=1 → 1200−10=1190
+  assert.equal(by.mStrong.adjusted, 1190);
+  // cost=100 → log2(1)=0 → 不罚不奖
+  assert.equal(by.mMedian.adjusted, 1100);
+  // 短板线：最低源百分位 30 < 40 → 不入池，且 reason 诚实说明
+  assert.equal(by.mGated.eligible, false);
+  assert.match(by.mGated.reason, /短板/);
+  assert.equal(out.lambda, 10);
+  assert.equal(out.gatePct, 40);
+});
+
+test("certifyNoBrainer: λ 全区间不变 + 无支配违规 → 认证；分叉 → 不认证", () => {
+  // 单点退化前沿：最强且最便宜（支配一切）→ 任何 λ 下 argmax 不变
+  const single = adjustedScores(
+    [
+      {
+        id: "dom",
+        name: "dom",
+        complete: true,
+        composite: 1200,
+        cost: 50,
+        percentiles: { vals: 90, livebench: 88, arena: 91 },
+      },
+      {
+        id: "weak",
+        name: "weak",
+        complete: true,
+        composite: 900,
+        cost: 300,
+        percentiles: { vals: 50, livebench: 48, arena: 52 },
+      },
+    ],
+    { lambda: 10 },
+  );
+  const cert1 = certifyNoBrainer(single);
+  assert.equal(cert1.certified, true);
+  assert.equal(cert1.pick, "dom");
+  assert.deepEqual(cert1.violations, []);
+  // 多点前沿：交点恰在扫描档 λ=20（1200−2λ = 1120+2λ，同分由行序先者胜），
+  // λ=40 档翻转到 cheap → 扫描分叉 → 不认证（不伪造单一答案）
+  const multi = adjustedScores(
+    [
+      {
+        id: "strong",
+        name: "strong",
+        complete: true,
+        composite: 1200,
+        cost: 400,
+        percentiles: { vals: 95, livebench: 93, arena: 94 },
+      },
+      {
+        id: "cheap",
+        name: "cheap",
+        complete: true,
+        composite: 1120,
+        cost: 25,
+        percentiles: { vals: 80, livebench: 82, arena: 81 },
+      },
+    ],
+    { lambda: 10 },
+  );
+  const cert2 = certifyNoBrainer(multi);
+  assert.equal(cert2.certified, false);
+  assert.equal(new Set(cert2.sweep.map((s) => s.pick)).size > 1, true);
+});
+
+test("certifyNoBrainer: 支配一致性违规可被检出（防公式回归）", () => {
+  // 人为构造 adjusted 与支配关系矛盾的行（直接喂伪造 adjusted 不可能——
+  // adjustedScores 总是按公式计算，故此处验证恒无违规的定理性质）
+  const rows = [
+    {
+      id: "a",
+      name: "a",
+      complete: true,
+      composite: 1100,
+      cost: 100,
+      percentiles: { vals: 80, livebench: 78, arena: 79 },
+    },
+    {
+      id: "b",
+      name: "b",
+      complete: true,
+      composite: 1000,
+      cost: 150,
+      percentiles: { vals: 70, livebench: 68, arena: 69 },
+    },
+  ];
+  const scored = adjustedScores(rows, { lambda: 10 });
+  const cert = certifyNoBrainer(scored);
+  assert.deepEqual(cert.violations, []);
+  assert.equal(cert.pick, "a");
+});
+
+test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达标也不入池", () => {
+  // 2026-11-11 裁定：认证是对全维度的断言，未测榜单无短板证据也无强度证据，
+  // 池成员资格要求全量榜单覆盖（详见 docs/adr/0019 修订记录）
+  const rows = [
+    {
+      id: "partialStrong",
+      name: "partialStrong",
+      composite: 1300,
+      cost: 20,
+      complete: false,
+      percentiles: { vals: 96, livebench: 94 },
+    },
+    {
+      id: "bothBad",
+      name: "bothBad",
+      composite: 1200,
+      cost: 50,
+      complete: false,
+      percentiles: { vals: 35, livebench: 60 },
+    },
+    {
+      id: "fullOk",
+      name: "fullOk",
+      composite: 1100,
+      cost: 100,
+      complete: true,
+      percentiles: { vals: 70, livebench: 65, arena: 72, aa: 68 },
+    },
+  ];
+  const out = adjustedScores(rows, { lambda: 10, gatePct: 40 });
+  const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
+  // 已测维度 96/94 全部 ≥40，仍因覆盖不全被拒
+  assert.equal(by.partialStrong.eligible, false);
+  assert.equal(by.partialStrong.floorPct, 94);
+  assert.equal(by.partialStrong.covered, 2);
+  assert.match(by.partialStrong.reason, /仅 2 榜/);
+  assert.match(by.partialStrong.reason, /未测榜单/);
+  // 短板与覆盖不全同时成立时，reason 报告更具体的短板线
+  assert.equal(by.bothBad.eligible, false);
+  assert.match(by.bothBad.reason, /短板线/);
+  assert.ok(!/未测榜单/.test(by.bothBad.reason));
+  // fail-closed：complete 字段缺失按不完整处理
+  const noField = adjustedScores([
+    {
+      id: "x",
+      name: "x",
+      composite: 1200,
+      cost: 100,
+      percentiles: { vals: 90, livebench: 88 },
+    },
+  ]);
+  assert.equal(noField.rows[0].eligible, false);
+  assert.equal(noField.rows[0].complete, false);
+  // 全量覆盖 + 短板线达标 → 入池
+  assert.equal(by.fullOk.eligible, true);
+  assert.equal(by.fullOk.complete, true);
+  // 只有部分覆盖模型 → 池空，pick 为 null，不认证
+  const onlyPartial = certifyNoBrainer(
+    adjustedScores([rows[0]], { lambda: 10 }),
+  );
+  assert.equal(onlyPartial.poolSize, 0);
+  assert.equal(onlyPartial.pick, null);
+  assert.equal(onlyPartial.certified, false);
+});

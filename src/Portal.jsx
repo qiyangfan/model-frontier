@@ -23,7 +23,7 @@ import {
   UnlockOutlined,
 } from "@ant-design/icons";
 import { NAMES, COSTS, costFormat, money } from "./presentation.mjs";
-import { csvExport } from "./analysis.mjs";
+import { adjustedScores, certifyNoBrainer, csvExport } from "./analysis.mjs";
 import {
   compareNullableScores,
   coverageSummary,
@@ -148,6 +148,7 @@ export function Overview({
   models,
   analysis,
   data,
+  costSource,
   onNavigate,
   onSelect,
   onQuickCompare,
@@ -162,6 +163,37 @@ export function Overview({
   const coverage = useMemo(
     () => coverageSummary(models, { includeEstimated }),
     [models, includeEstimated],
+  );
+  const verdict = useMemo(() => {
+    const scored = adjustedScores(analysis.rows);
+    return {
+      scored,
+      cert: certifyNoBrainer(scored),
+      hasInput: scored.rows.some((r) => Number.isFinite(r.adjusted)),
+    };
+  }, [analysis.rows]);
+  const gatedOut = useMemo(
+    () =>
+      verdict.scored.rows
+        .filter((r) => !r.eligible && Number.isFinite(r.floorPct))
+        .sort((a, b) => b.floorPct - a.floorPct)
+        .slice(0, 3),
+    [verdict],
+  );
+  const sweepRuns = useMemo(() => {
+    // 连续同选档合并为区间。调整分对 λ 线性，上包络顶线更替随 λ 单调，
+    // 同一模型不可能两次登顶，故 runs 按 pick 天然唯一。
+    const runs = [];
+    for (const s of verdict.cert.sweep) {
+      const last = runs[runs.length - 1];
+      if (last && last.pick === s.pick) last.to = s.lambda;
+      else runs.push({ pick: s.pick, from: s.lambda, to: s.lambda });
+    }
+    return runs;
+  }, [verdict]);
+  const pickRow = useMemo(
+    () => verdict.scored.rows.find((r) => r.id === verdict.cert.pick) ?? null,
+    [verdict],
   );
   const leaders = (items, label, icon) => (
     <section className="min-w-0 rounded-[13px] border border-line bg-surface p-[24px] shadow-card max-1180:p-[20px] max-760:p-[20px]">
@@ -281,6 +313,112 @@ export function Overview({
       <div className="mb-[20px] grid grid-cols-[1fr_1fr] gap-[20px] max-1180:gap-[16px] max-760:grid-cols-[minmax(0,1fr)]">
         {leaders(ranked, "综合能力领先", <TrophyOutlined aria-hidden="true" />)}
         {leaders(open, "开放权重领先", <UnlockOutlined aria-hidden="true" />)}
+        <section className="min-w-0 rounded-[13px] border border-line bg-surface p-[24px] shadow-card max-1180:p-[20px] max-760:p-[20px]">
+          <div className="portal-section-heading">
+            <div>
+              <span className="text-[9px] font-[650] tracking-[0.16em] text-[#668c86] max-760:text-[8px]">
+                PERFORMANCE × COST
+              </span>
+              <h2 className="mt-[5px] mb-0 flex items-center gap-[8px] text-[17px] font-semibold leading-[1.7] max-760:text-[16px]">
+                性价比首选
+              </h2>
+            </div>
+            <Button
+              type="text"
+              onClick={() => onNavigate("rankings")}
+              icon={<ArrowRightOutlined aria-hidden="true" />}
+            >
+              完整榜单
+            </Button>
+          </div>
+          {/* 调整分公式锚定综合相对成本指数（ADR-0019：costIndex 即 ADR-0003
+              三站中位比几何平均）；单站成本口径下 r.cost 是原始美元价，
+              log2(cost/100) 量纲错误，故仅综合口径出结论，其余口径如实说明。 */}
+          {costSource !== "composite" ? (
+            <Empty
+              description={`调整分按综合相对成本指数（100=池中位）计算，「${COSTS[costSource]}」单站成本口径不适用。`}
+            />
+          ) : verdict.cert.poolSize > 0 && pickRow ? (
+            <>
+              <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
+                性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；任一榜单存在短板（百分位低于
+                40）或实测不全的模型，已剔除。
+              </p>
+              {verdict.cert.poolSize === 1 ? (
+                <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
+                  唯一通过全量实测与短板筛选的候选，作为默认首选（ADR-0019）。
+                </p>
+              ) : verdict.cert.certified ? (
+                <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
+                  认证通过：「每贵一倍扣几分」从 0 调到
+                  40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健（ADR-0019）。
+                </p>
+              ) : (
+                <>
+                  <p className="m-0 mb-[8px] text-[12px] leading-[1.9] text-[#8a6a1f] max-760:text-[11px]">
+                    未认证：「每贵一倍扣几分」取值不同，首选就不同——预算观感决定选择，不伪造单一答案。
+                  </p>
+                  <div className="mb-[12px]">
+                    {sweepRuns.map((run, i) => {
+                      const row = verdict.scored.rows.find(
+                        (r) => r.id === run.pick,
+                      );
+                      return (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
+                        >
+                          <span className="text-[#627987]">
+                            每贵一倍扣{" "}
+                            {run.from === run.to
+                              ? run.from
+                              : `${run.from}–${run.to}`}{" "}
+                            分
+                          </span>
+                          {row ? nameCell(row, onSelect) : <b>{run.pick}</b>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {verdict.cert.certified || verdict.cert.poolSize === 1 ? (
+                <div className="leader-row">
+                  <span className="rank-badge first">1</span>
+                  {nameCell(pickRow, onSelect)}
+                  <div className="leader-score">
+                    <b>{number(pickRow.composite)}</b>
+                    <small>
+                      调整分 {pickRow.adjusted?.toFixed(0) ?? "—"} · 成本{" "}
+                      {costFormat(pickRow.cost, "composite")}
+                    </small>
+                  </div>
+                </div>
+              ) : null}
+              <p className="mt-[12px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
+                调整分 = 综合分 − 10·log2(成本指数/100)，成本指数
+                100=池中位（ADR-0019）。
+                {gatedOut.length
+                  ? `未入池：${gatedOut
+                      .map((r) =>
+                        r.complete
+                          ? `${r.name}（最低百分位 ${r.floorPct.toFixed(0)}）`
+                          : `${r.name}（仅 ${r.covered}/${analysis.sources.length} 榜实测）`,
+                      )
+                      .join("、")}。`
+                  : ""}
+              </p>
+            </>
+          ) : (
+            <Empty
+              description={
+                verdict.hasInput
+                  ? "无候选同时满足：全榜单有实测，且任一榜单都没有短板（百分位 ≥40）"
+                  : "无模型同时具备综合分与综合成本，未产生调整分"
+              }
+            />
+          )}
+        </section>
       </div>
       <div className="mb-[20px] grid grid-cols-[1fr_1fr] gap-[20px] max-1180:gap-[16px] max-760:grid-cols-[minmax(0,1fr)]">
         <section className="min-w-0 rounded-[13px] border border-line bg-surface p-[24px] shadow-card max-1180:p-[20px] max-760:p-[20px]">

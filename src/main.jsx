@@ -1167,6 +1167,7 @@ function App() {
             models={evaluationModels}
             analysis={analysis}
             data={data}
+            costSource={costSource}
             onNavigate={navigate}
             onSelect={setSelected}
             onQuickCompare={quickCompare}
