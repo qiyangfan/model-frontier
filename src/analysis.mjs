@@ -816,3 +816,19 @@ export function certifyNoBrainer(
     gatePct,
   };
 }
+
+// ADR-0020：完整性价比榜单的排序与池外分组。入池模型按 λ=10 调整分降序占名次；
+// 调整分并列时按综合分降序、名称升序，保证渲染次序确定（不随输入顺序漂移）。
+// 池外只收有输入（有调整分）的行——缺综合分或成本的模型本卡片无从评估，不在其列。
+export function valueRanking(scored) {
+  const ranked = scored.rows
+    .filter((r) => r.eligible)
+    .sort(
+      (a, b) =>
+        b.adjusted - a.adjusted ||
+        b.composite - a.composite ||
+        a.name.localeCompare(b.name),
+    );
+  const gatedOut = scored.rows.filter((r) => !r.eligible && r.adjusted != null);
+  return { ranked, gatedOut };
+}

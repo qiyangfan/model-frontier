@@ -424,7 +424,11 @@ test("csv export leaves the data time empty instead of throwing on a corrupted t
   assert.ok(!csv.includes("Invalid"));
 });
 
-import { adjustedScores, certifyNoBrainer } from "../src/analysis.mjs";
+import {
+  adjustedScores,
+  certifyNoBrainer,
+  valueRanking,
+} from "../src/analysis.mjs";
 test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；中位成本不罚不奖", () => {
   const rows = [
     {
@@ -610,4 +614,89 @@ test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达�
   assert.equal(onlyPartial.poolSize, 0);
   assert.equal(onlyPartial.pick, null);
   assert.equal(onlyPartial.certified, false);
+});
+
+test("valueRanking: 入池按调整分降序占名次，并列按综合分、名称兜底；池外只收有输入的行", () => {
+  const full = { vals: 90, livebench: 85, arena: 88, aa: 82 };
+  // c 与 d 调整分同为 1140（c: 1150−10·log2(2)，d: 1160−10·log2(4)）→ 综合分高者在前；
+  // e1/e2 调整分与综合分双并列 → 名称兜底保证渲染次序确定（ADR-0020）
+  const rows = [
+    {
+      id: "a",
+      name: "a",
+      complete: true,
+      composite: 1200,
+      cost: 100,
+      percentiles: full,
+    },
+    {
+      id: "b",
+      name: "b",
+      complete: true,
+      composite: 1100,
+      cost: 100,
+      percentiles: full,
+    },
+    {
+      id: "c",
+      name: "c",
+      complete: true,
+      composite: 1150,
+      cost: 200,
+      percentiles: full,
+    },
+    {
+      id: "d",
+      name: "d",
+      complete: true,
+      composite: 1160,
+      cost: 400,
+      percentiles: full,
+    },
+    {
+      id: "e1",
+      name: "beta",
+      complete: true,
+      composite: 1000,
+      cost: 100,
+      percentiles: full,
+    },
+    {
+      id: "e2",
+      name: "alpha",
+      complete: true,
+      composite: 1000,
+      cost: 100,
+      percentiles: full,
+    },
+    {
+      id: "gated",
+      name: "gated",
+      complete: true,
+      composite: 1300,
+      cost: 100,
+      percentiles: { vals: 95, livebench: 92, arena: 30, aa: 80 },
+    },
+    {
+      id: "noInput",
+      name: "noInput",
+      complete: false,
+      composite: null,
+      cost: null,
+      percentiles: {},
+    },
+  ];
+  const { ranked, gatedOut } = valueRanking(
+    adjustedScores(rows, { lambda: 10, gatePct: 40 }),
+  );
+  // 输入顺序与名次无关，断言完整排序序列
+  assert.deepEqual(
+    ranked.map((r) => r.id),
+    ["a", "d", "c", "b", "e2", "e1"],
+  );
+  // 池外只收有调整分的行：短板行入尾表，无综合分/成本的行不收
+  assert.deepEqual(
+    gatedOut.map((r) => r.id),
+    ["gated"],
+  );
 });

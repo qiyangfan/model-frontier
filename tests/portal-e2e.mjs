@@ -53,6 +53,18 @@ try {
   });
   await page.waitForFunction(() => !location.hash.includes("score="));
   assert.equal(await page.getByRole("tab").count(), 5);
+  // 性价比首选卡片（ADR-0020）：完整榜单至少 1 行、名次徽章从 1 起、夹具存在未入池尾表；
+  // 不写模型名与具体行数，不钉认证态（夹具重生成后认证与否可能翻转）
+  const valueCard = page.locator(".value-pick-card");
+  await valueCard
+    .getByRole("heading", { name: "性价比首选", exact: true })
+    .waitFor();
+  assert.equal((await valueCard.locator(".leader-row").count()) >= 1, true);
+  assert.equal(
+    await valueCard.locator(".leader-row .rank-badge").first().textContent(),
+    "1",
+  );
+  await valueCard.getByText("未入池", { exact: true }).waitFor();
   await page.goto(base + "/#stability?");
   await page
     .getByRole("heading", { name: "综合能力领先", exact: true })
