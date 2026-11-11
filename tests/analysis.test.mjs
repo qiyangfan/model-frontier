@@ -435,6 +435,7 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺�
     {
       id: "mFull",
       name: "mFull",
+      openWeights: true,
       composite: 1200,
       cost: 200,
       percentiles: { vals: 90, livebench: 85, arena: 88, aa: 86 },
@@ -459,6 +460,8 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺�
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
   // cost=200 → log2(2)=1 → 1200−10=1190（全测无缺榜罚）
   assert.equal(by.mFull.adjusted, 1190);
+  // openWeights 透传（性价比卡「仅开源」快筛依赖此字段）
+  assert.equal(by.mFull.openWeights, true);
   // cost=100 → log2(1)=0 → 成本不罚不奖
   assert.equal(by.mMedian.adjusted, 1100);
   // 缺 1 榜：1300 − 15×1 = 1285；floorPct 保留为描述字段

@@ -5,7 +5,7 @@ import {
   COST_SOURCES as TASK_COST_SOURCES,
 } from "../shared/sources.mjs";
 const COST_SOURCES = [...TASK_COST_SOURCES, "composite"];
-const FOCUS_VALUES = ["openFirst", "all", "openOnly"];
+const FOCUS_VALUES = ["openFirst", "all", "openOnly", "cnOnly"];
 const OPENNESS_VALUES = ["all", "open", "closed", "unknown"];
 const VIEWS = ["fusion", ...SOURCES];
 const BUDGET_SOURCES = ["none", ...TASK_COST_SOURCES];

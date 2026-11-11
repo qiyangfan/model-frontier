@@ -22,7 +22,14 @@ import {
   TrophyOutlined,
   UnlockOutlined,
 } from "@ant-design/icons";
-import { NAMES, COSTS, costFormat, money } from "./presentation.mjs";
+import {
+  NAMES,
+  COSTS,
+  costFormat,
+  money,
+  valueFilterPredicate,
+  isDomesticCreator,
+} from "./presentation.mjs";
 import {
   adjustedScores,
   certifyNoBrainer,
@@ -92,21 +99,32 @@ const nameCell = (r, onSelect, id = r.id) => (
     </span>
   </button>
 );
-// 厂商快捷筛选行：chip 与「排行榜厂商」下拉同源（creator 字段），再次点击取消；
-// 计数口径与下拉一致（当前视图完整行池），0 命中置灰避免点出空表；但激活态永不置灰——
-// 已选中的筛选必须始终可取消（切换源站后某厂商记录归零时该状态可达），禁用只针对未激活的空 chip。
+// 快捷筛选 chips 行：chip 单选可取消（再点激活项回「全部」）；计数随传入行池；
+// 0 命中置灰避免点出空表；但激活态永不置灰——已选中的筛选必须始终可取消。
+// 泛化点（默认值=排行榜厂商筛选的原行为）：文案前缀 label、title 提示 hint、
+// chip 锚类 chipClass（E2E 页级定位依赖锚类不串场）、空态说明 emptyNote。
 // 只改变显示，不影响分数、名次与前沿成员。
-export function CreatorChips({ chips, creator, onChange, className = "" }) {
+export function CreatorChips({
+  chips,
+  creator,
+  onChange,
+  className = "",
+  label = "厂商快捷筛选",
+  chipClass = "creator-chip",
+  chipPrefix = "厂商",
+  hint = "完整列表见「全部厂商」下拉",
+  emptyNote = "当前视图暂无该厂商配置",
+}) {
   return (
     <div
       className={
         "creator-chips flex flex-wrap items-center gap-[7px] " + className
       }
       role="group"
-      aria-label="厂商快捷筛选"
+      aria-label={label}
     >
       <span className="text-[10px] font-[650] tracking-[0.06em] text-[#7b958d]">
-        厂商快捷筛选
+        {label}
       </span>
       {chips.map((chip) => {
         const active = creator === chip.value;
@@ -118,15 +136,14 @@ export function CreatorChips({ chips, creator, onChange, className = "" }) {
             aria-pressed={active}
             disabled={empty && !active}
             title={
-              `厂商 ${chip.value}` +
+              `${chipPrefix} ${chip.value}` +
               (chip.note ? ` · ${chip.note}` : "") +
-              " · 完整列表见「全部厂商」下拉" +
-              (active || !empty
-                ? "；再次点击取消筛选"
-                : "；当前视图暂无该厂商配置")
+              ` · ${hint}` +
+              (active || !empty ? "；再次点击取消筛选" : `；${emptyNote}`)
             }
             className={
-              "creator-chip inline-flex items-center gap-[5px] rounded-full border px-[10px] py-[2px] text-[11px] leading-[1.7] transition-colors " +
+              chipClass +
+              " inline-flex items-center gap-[5px] rounded-full border px-[10px] py-[2px] text-[11px] leading-[1.7] transition-colors " +
               (active
                 ? "border-[#128574] bg-[#eaf5f1] font-medium text-[#0c6e5e]"
                 : "border-[#dce7e3] bg-white text-[#5f7c74] hover:border-[#a8cdc0] hover:text-[#2c6f60]") +
@@ -175,7 +192,6 @@ export function Overview({
     return {
       scored,
       cert: certifyNoBrainer(scored),
-      hasInput: scored.rows.some((r) => Number.isFinite(r.adjusted)),
     };
   }, [analysis.rows]);
   // 编程优先视图（ADR-0022）：LiveBench 编程/长程代理/浏览器三轴均分百分位。
@@ -192,6 +208,35 @@ export function Overview({
   // 加冕条件与 ADR-0019 单条推荐期一致：认证通过（λ 全区间 argmax 唯一）或池中仅剩
   // 唯一候选。未认证时榜单照常展示但第 1 名不加冕（ADR-0020：排序是信息展示，加冕才需要认证）。
   const crowned = verdict.cert.certified || verdict.cert.poolSize === 1;
+  // 分档扫描是否全区间同选：同选时区间表恒指向排序键第 1 名（键与扫描 λ=10 档同构），
+  // 展开区间行零信息量——未认证说明压缩为单行；分叉时才展开（那才是预算观感改变选择的真实信息）。
+  const sweepUnified =
+    new Set(verdict.cert.sweep.map((s) => s.pick)).size === 1;
+  // 快速筛选（仅开源/仅国产）：纯展示层过滤，名次保持全榜口径（徽章跳号是诚实呈现）。
+  // 与 valueView 同层：显示状态，不持久化、不入分享链接。
+  const [valueFilter, setValueFilter] = useState(undefined);
+  const valueRows = useMemo(() => {
+    const pred = valueFilterPredicate(valueFilter);
+    return ranking.ranked
+      .map((r, i) => ({ r, rank: i + 1 }))
+      .filter(({ r }) => pred(r));
+  }, [ranking.ranked, valueFilter]);
+  const valueChips = useMemo(
+    () => [
+      {
+        value: "open",
+        label: "仅开源",
+        count: ranking.ranked.filter((r) => r.openWeights === true).length,
+      },
+      {
+        value: "cn",
+        label: "仅国产",
+        count: ranking.ranked.filter((r) => isDomesticCreator(r.creator))
+          .length,
+      },
+    ],
+    [ranking.ranked],
+  );
   const sweepRuns = useMemo(() => {
     // 连续同选档合并为区间。调整分对 λ 线性，上包络顶线更替随 λ 单调，
     // 同一模型不可能两次登顶，故 runs 按 pick 天然唯一。
@@ -321,7 +366,7 @@ export function Overview({
       <div className="mb-[20px] grid grid-cols-[1fr_1fr] gap-[20px] max-1180:gap-[16px] max-760:grid-cols-[minmax(0,1fr)]">
         {leaders(ranked, "综合能力领先", <TrophyOutlined aria-hidden="true" />)}
         {leaders(open, "开放权重领先", <UnlockOutlined aria-hidden="true" />)}
-        {/* ADR-0020：整卡占满一行——完整榜单 + 未入池尾表比双列卡更长，并排会失衡 */}
+        {/* ADR-0020：整卡占满一行——完整榜单比双列卡更长，并排会失衡 */}
         <section className="value-pick-card col-span-2 max-760:col-span-1 min-w-0 rounded-[13px] border border-line bg-surface p-[24px] shadow-card max-1180:p-[20px] max-760:p-[20px]">
           <div className="portal-section-heading">
             <div>
@@ -365,17 +410,21 @@ export function Overview({
               {valueView === "composite" &&
                 (verdict.cert.poolSize === 1 ? (
                   <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
-                    唯一通过四榜全量实测的候选，作为默认首选。
+                    唯一具备综合分与综合成本的候选，作为默认首选。
                   </p>
                 ) : verdict.cert.certified ? (
                   <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
                     认证通过：「每贵一倍扣几分」从 0 调到
-                    40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健。
+                    40，首选都是同一个，对各种预算观感都稳健。
+                  </p>
+                ) : sweepUnified ? (
+                  <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#8a6a1f] max-760:text-[11px]">
+                    未认证：缺榜罚分下证据不全，第 1 名不加首选标记。
                   </p>
                 ) : (
                   <>
                     <p className="m-0 mb-[8px] text-[12px] leading-[1.9] text-[#8a6a1f] max-760:text-[11px]">
-                      未认证：「每贵一倍扣几分」取值不同，首选就会不同——预算观感决定选择，不伪造单一答案；榜单第
+                      未认证：「每贵一倍扣几分」取值不同首选随之不同，或模型间支配关系存在矛盾——不伪造单一答案；榜单第
                       1 名不加首选标记。
                     </p>
                     <div className="mb-[12px]">
@@ -402,44 +451,62 @@ export function Overview({
                     </div>
                   </>
                 ))}
-              {ranking.ranked.map((r, i) => (
-                <div className="leader-row" key={r.id}>
-                  <span
-                    className={
-                      "rank-badge " +
-                      (i === 0 && crowned && valueView === "composite"
-                        ? "first"
-                        : "")
-                    }
-                  >
-                    {i + 1}
-                  </span>
-                  {nameCell(r, onSelect)}
-                  {i === 0 && crowned && valueView === "composite" ? (
-                    <span className="flex-shrink-0 rounded-full border border-[#cfe6df] bg-[#e2f3ec] px-[9px] py-[2px] text-[10px] font-[650] text-[#0c806e]">
-                      首选
+              <CreatorChips
+                chips={valueChips}
+                creator={valueFilter}
+                onChange={setValueFilter}
+                className="mb-[10px]"
+                label="快速筛选"
+                chipClass="value-filter-chip"
+                chipPrefix="筛选"
+                hint="筛选只改变显示，名次保持全榜口径"
+                emptyNote="当前在榜模型中没有该类"
+              />
+              {valueRows.length === 0 ? (
+                <p className="m-0 mb-[8px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
+                  该筛选下当前没有在榜模型；再次点击激活的 chip 取消筛选。
+                </p>
+              ) : (
+                valueRows.map(({ r, rank }) => (
+                  <div className="leader-row" key={r.id}>
+                    <span
+                      className={
+                        "rank-badge " +
+                        (rank === 1 && crowned && valueView === "composite"
+                          ? "first"
+                          : "")
+                      }
+                    >
+                      {rank}
                     </span>
-                  ) : null}
-                  <div className="leader-score">
-                    <b>
-                      {valueView === "coding"
-                        ? (codingMap.get(r.id)?.toFixed(0) ?? "—")
-                        : (r.adjusted?.toFixed(0) ?? "—")}
-                    </b>
-                    <small>
-                      综合分 {number(r.composite)} · 成本{" "}
-                      {costFormat(r.cost, "composite")}
-                      {r.covered < analysis.sources.length
-                        ? ` · ${r.covered}/${analysis.sources.length} 榜`
-                        : ""}
-                    </small>
+                    {nameCell(r, onSelect)}
+                    {rank === 1 && crowned && valueView === "composite" ? (
+                      <span className="flex-shrink-0 rounded-full border border-[#cfe6df] bg-[#e2f3ec] px-[9px] py-[2px] text-[10px] font-[650] text-[#0c806e]">
+                        首选
+                      </span>
+                    ) : null}
+                    <div className="leader-score">
+                      <b>
+                        {valueView === "coding"
+                          ? (codingMap.get(r.id)?.toFixed(0) ?? "—")
+                          : (r.adjusted?.toFixed(0) ?? "—")}
+                      </b>
+                      <small>
+                        {valueView === "coding" ? "编程百分位 · " : ""}
+                        综合分 {number(r.composite)} · 成本{" "}
+                        {costFormat(r.cost, "composite")}
+                        {r.covered < analysis.sources.length
+                          ? ` · ${r.covered}/${analysis.sources.length} 榜`
+                          : ""}
+                      </small>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
               {ranking.excludedCount > 0 ? (
                 <p className="mt-[10px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
                   其余 {ranking.excludedCount}{" "}
-                  个模型实测不足两榜或综合成本不足两源，暂无法评估性价比；源站补齐实测后自动入榜。
+                  个模型缺综合分或综合成本，暂无法评估性价比；源站补齐实测后自动入榜。
                 </p>
               ) : null}
               {valueView === "composite" ? (
@@ -450,13 +517,7 @@ export function Overview({
               ) : null}
             </>
           ) : (
-            <Empty
-              description={
-                verdict.hasInput
-                  ? "无候选同时满足：四榜全部有有效实测分"
-                  : "无模型同时具备综合分与综合成本，未产生调整分"
-              }
-            />
+            <Empty description="无模型同时具备综合分与综合成本，未产生调整分" />
           )}
         </section>
       </div>

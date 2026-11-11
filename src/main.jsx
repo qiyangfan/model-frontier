@@ -48,8 +48,9 @@ import {
   costFormat,
   money,
   formatTime,
+  isDomesticCreator,
 } from "./presentation.mjs";
-import { analyze, csvExport, sourceAudit } from "./analysis.mjs";
+import { analyze, csvExport, sourceAudit, pareto } from "./analysis.mjs";
 import { Overview, Rankings, Comparison, CreatorChips } from "./Portal.jsx";
 import {
   applyBudget,
@@ -435,10 +436,30 @@ function App() {
       }),
     [evaluationModels, costSource, estimated, activeCostSources],
   );
+  // 国产子集前沿：约束型 lens——被国外模型支配、但在「只考虑国产」约束下仍不被国产
+  // 模型支配的模型（如 MiMo V2.6 系）。展示层派生（与 openFrontier 的 analyze 字段不同层：
+  // 不进 API/CSV，仅探索页图表消费）；口径与 r.frontier 一致——用 plottable 全集、不随
+  // 预算筛选重算（预算滑杆改变的是显示窗口，不是前沿身份，与 spec「切换不重算前沿身份」同理）。
+  const cnFrontierIds = useMemo(
+    () =>
+      new Set(
+        pareto(
+          analysis.rows.filter(
+            (r) => r.plottable && isDomesticCreator(r.creator),
+          ),
+        ).map((r) => r.id),
+      ),
+    [analysis.rows],
+  );
   const chartRows = useMemo(
     () =>
       applyBudget(analysis.rows, { budgetSource, budgetLimit })
-        .filter((r) => focus !== "openOnly" || r.openWeights === true)
+        .filter(
+          (r) =>
+            (focus !== "openOnly" || r.openWeights === true) &&
+            (focus !== "cnOnly" || isDomesticCreator(r.creator)),
+        )
+        .map((r) => ({ ...r, cnFrontier: cnFrontierIds.has(r.id) }))
         .sort(
           (a, b) =>
             (focus === "openFirst"
@@ -448,7 +469,7 @@ function App() {
             (b.auxiliary ?? -1) - (a.auxiliary ?? -1) ||
             b.coverage - a.coverage,
         ),
-    [analysis, focus, budgetSource, budgetLimit],
+    [analysis, focus, budgetSource, budgetLimit, cnFrontierIds],
   );
   // 表格过滤独立于帕累托图搜索；厂商、文本和前沿条件都只收窄表格行。
   const rows = useMemo(
@@ -457,7 +478,7 @@ function App() {
         (r) =>
           matchesSearch(r, query) &&
           (!creator || r.creator === creator) &&
-          (!onlyFront || r.frontier || r.openFrontier),
+          (!onlyFront || r.frontier || r.openFrontier || r.cnFrontier),
       ),
     [chartRows, query, creator, onlyFront],
   );
@@ -790,6 +811,8 @@ function App() {
           <Tag color="blue">全球前沿</Tag>
         ) : r.openFrontier ? (
           <Tag color="green">开放权重前沿</Tag>
+        ) : r.cnFrontier ? (
+          <Tag color="orange">国产前沿</Tag>
         ) : (
           <span className="muted text-[#6b818f] leading-[1.85]">
             {r.reason ?? "非前沿"}
@@ -1252,11 +1275,18 @@ function App() {
                     />
                     <Segmented
                       aria-label="模型范围"
-                      value={focus === "openOnly" ? "openOnly" : "all"}
+                      value={
+                        focus === "openOnly"
+                          ? "openOnly"
+                          : focus === "cnOnly"
+                            ? "cnOnly"
+                            : "all"
+                      }
                       onChange={setFocus}
                       options={[
                         { label: "全部模型", value: "all" },
                         { label: "仅开放权重", value: "openOnly" },
+                        { label: "仅国产", value: "cnOnly" },
                       ]}
                     />
                   </div>

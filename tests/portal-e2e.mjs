@@ -53,8 +53,8 @@ try {
   });
   await page.waitForFunction(() => !location.hash.includes("score="));
   assert.equal(await page.getByRole("tab").count(), 5);
-  // 性价比首选卡片（ADR-0020）：完整榜单至少 1 行、名次徽章从 1 起、夹具存在未入池尾表；
-  // 不写模型名与具体行数，不钉认证态（夹具重生成后认证与否可能翻转）
+  // 性价比首选卡片（ADR-0020/0023）：完整榜单至少 1 行、名次徽章从 1 起、夹具存在
+  // 「暂无法评估」披露行；不写模型名与具体行数，不钉认证态（夹具重生成后认证与否可能翻转）
   const valueCard = page.locator(".value-pick-card");
   await valueCard
     .getByRole("heading", { name: "性价比首选", exact: true })
@@ -76,6 +76,41 @@ try {
     "1",
   );
   await valueCard.getByText("综合性价比", { exact: true }).click();
+  // 快速筛选 chips（value-filter-chip）：仅开源/仅国产。开源与国产计数随夹具漂移，
+  // 断言容差——chip 未置灰时点击后行数不增且恢复原行数；置灰（0 命中）只验存在。
+  const openChip = valueCard
+    .locator(".value-filter-chip", { hasText: "仅开源" })
+    .first();
+  const cnChip = valueCard
+    .locator(".value-filter-chip", { hasText: "仅国产" })
+    .first();
+  await openChip.waitFor();
+  await cnChip.waitFor();
+  const rowsAll = await valueCard.locator(".leader-row").count();
+  assert.ok(rowsAll >= 1);
+  for (const chip of [openChip, cnChip]) {
+    if (await chip.isDisabled()) continue;
+    await chip.click();
+    // 点击后等待 React 提交再断言：立即 count() 会读到筛选前的 DOM（竞态）
+    await page.waitForFunction((n) => {
+      const c = document.querySelectorAll(
+        ".value-pick-card .leader-row",
+      ).length;
+      return c >= 1 && c <= n;
+    }, rowsAll);
+    // 名次徽章保持全榜口径：筛后首行徽章号 ≤ 全部行数（可跳号，不恒为 1）
+    const firstBadge = Number(
+      await valueCard.locator(".leader-row .rank-badge").first().textContent(),
+    );
+    assert.ok(firstBadge >= 1 && firstBadge <= rowsAll);
+    await chip.click(); // 再次点击取消筛选
+    await page.waitForFunction(
+      (n) =>
+        document.querySelectorAll(".value-pick-card .leader-row").length === n,
+      rowsAll,
+    );
+  }
+  assert.equal(await valueCard.locator(".leader-row").count(), rowsAll);
   await page.goto(base + "/#stability?");
   await page
     .getByRole("heading", { name: "综合能力领先", exact: true })
@@ -375,6 +410,28 @@ try {
     .locator('.models-panel .creator-chip[aria-pressed="true"]')
     .click();
   await page.waitForFunction(() => !location.hash.includes("cr="));
+  // 模型范围三值：仅国产（focus=cnOnly）切换后图例出现「国产前沿」线；切回全部模型恢复。
+  // 夹具确定性含国产 plotted 模型（图表必然渲染）；不钉前沿成员数量。
+  await page
+    .getByLabel("模型范围")
+    .getByText("仅国产", { exact: true })
+    .click();
+  await page.locator(".chart-legend").getByText("国产前沿").waitFor();
+  await page
+    .getByLabel("模型范围")
+    .getByText("全部模型", { exact: true })
+    .click();
+  // 等图例 React 提交后再断言消失（立即 count 会读到切换前 DOM）
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".chart-legend button")].every(
+      (b) => !b.textContent.includes("国产前沿"),
+    ),
+  );
+  assert.equal(
+    await page.locator(".chart-legend").getByText("国产前沿").count(),
+    0,
+    "切回全部模型后不应再显示国产前沿图例",
+  );
   await tab("融合排行榜");
   // 能力维度、口径差异、预算筛选与分享链接
   await page

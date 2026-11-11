@@ -749,6 +749,8 @@ export function adjustedScores(rows, { lambda = 10 } = {}) {
       id: r.id,
       name: r.name,
       creator: r.creator,
+      // openWeights 透传：性价比卡「仅开源」快筛按此判定（展示层过滤，ADR-0023 批次）
+      openWeights: r.openWeights,
       composite: r.composite,
       cost: r.cost,
       floorPct,

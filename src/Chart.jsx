@@ -41,6 +41,7 @@ const LEGEND = [
   ["闭源 / 未确认", "closed"],
   ["全球前沿", "global"],
   ["开放权重前沿", "frontier"],
+  ["国产前沿", "cn"],
 ];
 // 图例标记样式查找表：原 .legend-marker 及 .open/.closed/.global/.frontier 变体内联
 const LEGEND_MARKERS = {
@@ -51,6 +52,7 @@ const LEGEND_MARKERS = {
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_dashed_#3267b8]",
   frontier:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#128574]",
+  cn: "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#b0653a]",
 };
 export default function Chart({
   rows,
@@ -201,7 +203,9 @@ export default function Chart({
       plot,
       axisMax,
       yMin,
-      openOnly: focus === "openOnly",
+      // 非「全部模型」范围（仅开放权重/仅国产）都不绘制依附全球前沿的支配区域：
+      // 该区域只对全量口径有意义，子集视图下「被支配」会指向筛选外的模型
+      openOnly: focus !== "all",
     };
     paintedZone.current = null;
     const point = (r) => ({
@@ -213,7 +217,7 @@ export default function Chart({
       value: [Math.log10(r.cost), r.composite],
       row: r,
       label: {
-        show: r.frontier || r.openFrontier,
+        show: r.frontier || r.openFrontier || r.cnFrontier,
         formatter: r.name,
         position: "top",
         distance: 10,
@@ -259,7 +263,7 @@ export default function Chart({
         },
         label: {
           ...base.label,
-          show: !(r.frontier || r.openFrontier),
+          show: !(r.frontier || r.openFrontier || r.cnFrontier),
           color: "#8a4b00",
           backgroundColor: "#fff8ec",
           borderColor: "#e9b56a",
@@ -328,7 +332,7 @@ export default function Chart({
             const dominated = r.dominatedBy?.length
               ? `<div class="mx-[18px] border-t border-t-[#edf1f4] py-[10px] text-[10px] leading-[1.7] text-[#a9635a] whitespace-normal [overflow-wrap:anywhere]">被 ${esc(r.dominatedBy.slice(0, 2).join("、"))}${r.dominatedBy.length > 2 ? ` 等 ${r.dominatedBy.length} 个前沿模型` : ""}同时以更低成本、更高 PK 主积分支配</div>`
               : "";
-            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div><div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">三站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/3 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
+            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div><div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">三站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/3 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : r.cnFrontier ? "国产前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
           },
         },
         legend: {
@@ -431,7 +435,7 @@ export default function Chart({
         series: [
           line(
             "全球前沿",
-            (r) => focus !== "openOnly" && r.frontier,
+            (r) => focus !== "openOnly" && focus !== "cnOnly" && r.frontier,
             "#3267b8",
             true,
             "global-frontier",
@@ -440,6 +444,12 @@ export default function Chart({
             "开放权重前沿",
             (r) => focus === "openOnly" && r.openFrontier,
             "#128574",
+            false,
+          ),
+          line(
+            "国产前沿",
+            (r) => focus === "cnOnly" && r.cnFrontier,
+            "#b0653a",
             false,
           ),
           {
@@ -538,7 +548,9 @@ export default function Chart({
           {LEGEND.filter(([, kind]) =>
             focus === "openOnly"
               ? kind === "open" || kind === "frontier"
-              : kind !== "frontier",
+              : focus === "cnOnly"
+                ? kind !== "global" && kind !== "frontier"
+                : kind !== "frontier" && kind !== "cn",
           ).map(([name, kind]) => (
             <button
               key={name}
