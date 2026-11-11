@@ -64,7 +64,8 @@ try {
     await valueCard.locator(".leader-row .rank-badge").first().textContent(),
     "1",
   );
-  await valueCard.getByText("未入池", { exact: true }).waitFor();
+  // 子串匹配「未入池」段头：不钉完整文案（段头措辞可能演进），只验证尾表存在
+  await valueCard.getByText("未入池").waitFor();
   await page.goto(base + "/#stability?");
   await page
     .getByRole("heading", { name: "综合能力领先", exact: true })

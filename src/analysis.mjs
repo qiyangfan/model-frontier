@@ -710,19 +710,20 @@ export function sourceAudit(models, modelId, source) {
   };
 }
 
-// ══════════ ADR-0019：成本调整综合分与无脑选决策层 ══════════
+// ══════════ ADR-0019：成本调整综合分与无脑选决策层（池资格经 ADR-0021 改纯综合锚） ══════════
 // 调整分 = composite − λ·log2(costIndex/100)（costIndex: 100=池中位，ADR-0003 口径）。
-// 三公理：支配一致性（λ·log2 单调性定理保证，certify 内自检）、短板淘汰（任一榜单百分位
-// 低于下限即出局；术语源自 harness-bench「塌方门」，对外文案统一称「短板」——四张第三方
-// 榜单即四种测量体系，本门测的是各榜最低百分位的绝对下限而非分化幅度，2026-11-11 裁定
-// 见 docs/adr/0019 修订记录；另要求全量榜单覆盖——未测榜单无短板证据也无强度证据，认证的
-// 全维度断言必须有完整证据集）、膝盖收敛（λ 扫描 argmax 不变性 = 最小最大遗憾解）。
+// 三公理：支配一致性（λ·log2 单调性定理保证，certify 内自检）、全量覆盖（4/4 榜有效实测
+// 才入池——未测榜单无强度证据，认证的全维度断言必须有完整证据集，ADR-0021 维持）、
+// 膝盖收敛（λ 扫描 argmax 不变性 = 最小最大遗憾解）。
+// ADR-0021 移除每榜短板线（原 ADR-0019「塌方门」，gatePct=40）：实证取值 0~50 认证与
+// 首选恒不变（只改池名单），且每榜否决权含 Vals 经济任务等与使用场景无关的专项轴——
+// 锚点错配，见 docs/adr/0021。floorPct 保留为描述字段（最弱已测榜百分位）。
 // 扫描取 6 个格点即精确：调整分对 λ 线性，上包络顶线更替只能发生在交叉点且必改变其所在
 // 区间端点的 argmax，故 [0,40] 连续区间内任何 argmax 更替都会在格点上显形，格点认证
 // 与连续认证等价、非近似。
 // λ=10：经三榜交叉 21 模型实测市场斜率 9.4±2.7/翻倍校准（2026-11-10，详见 docs/adr/0019）。
 
-export function adjustedScores(rows, { lambda = 10, gatePct = 40 } = {}) {
+export function adjustedScores(rows, { lambda = 10 } = {}) {
   const out = rows.map((r) => {
     const pct = Number.isFinite(r.composite)
       ? Object.values(r.percentiles ?? {}).filter(Number.isFinite)
@@ -734,19 +735,12 @@ export function adjustedScores(rows, { lambda = 10, gatePct = 40 } = {}) {
       ? r.composite - lambda * Math.log2(r.cost / 100)
       : null;
     const complete = r.complete === true; // 缺字段按不完整处理：决策门宁缺毋滥（fail-closed）
-    const floorOk =
-      hasInput && Number.isFinite(floorPct) && floorPct >= gatePct;
-    const eligible = floorOk && complete;
-    // reason 按「最具体的失败」优先：已测榜单存在短板比覆盖不足更能说明问题，即使两者同时成立
+    const eligible = hasInput && complete;
     const reason = !hasInput
       ? (r.reason ?? "composite 或成本缺失，不入调整分")
-      : !Number.isFinite(floorPct)
-        ? "无有效榜单百分位，短板无法评估"
-        : !floorOk
-          ? `最低榜单百分位 ${floorPct.toFixed(0)} 低于短板线 ${gatePct}，存在短板榜单，不入首选池`
-          : !complete
-            ? `仅 ${pct.length} 榜有效实测分，无法排除未测榜单的短板，不入首选池`
-            : null;
+      : !complete
+        ? `仅 ${pct.length} 榜有效实测分，证据不全，不入正式排名`
+        : null;
     return {
       id: r.id,
       name: r.name,
@@ -761,14 +755,14 @@ export function adjustedScores(rows, { lambda = 10, gatePct = 40 } = {}) {
       reason,
     };
   });
-  return { lambda, gatePct, rows: out };
+  return { lambda, rows: out };
 }
 
 export function certifyNoBrainer(
   scored,
   { lambdaList = [0, 2.5, 5, 10, 20, 40] } = {},
 ) {
-  const { rows, lambda, gatePct } = scored;
+  const { rows, lambda } = scored;
   const pool = rows.filter((r) => r.eligible);
   const violations = [];
   for (const a of pool) {
@@ -813,22 +807,21 @@ export function certifyNoBrainer(
     violations,
     poolSize: pool.length,
     lambda,
-    gatePct,
   };
 }
 
-// ADR-0020：完整性价比榜单的排序与池外分组。入池模型按 λ=10 调整分降序占名次；
-// 调整分并列时按综合分降序、名称升序，保证渲染次序确定（不随输入顺序漂移）。
+// ADR-0020：完整性价比榜单的排序与池外分组。榜内（入池，占名次、可加冕）与
+// 续排（池外，不占名次、无加冕资格）共用同一排序键：调整分降序，并列按综合分
+// 降序、名称升序，保证渲染次序确定（不随输入顺序漂移）。
 // 池外只收有输入（有调整分）的行——缺综合分或成本的模型本卡片无从评估，不在其列。
 export function valueRanking(scored) {
-  const ranked = scored.rows
-    .filter((r) => r.eligible)
-    .sort(
-      (a, b) =>
-        b.adjusted - a.adjusted ||
-        b.composite - a.composite ||
-        a.name.localeCompare(b.name),
-    );
-  const gatedOut = scored.rows.filter((r) => !r.eligible && r.adjusted != null);
+  const byAdjusted = (a, b) =>
+    b.adjusted - a.adjusted ||
+    b.composite - a.composite ||
+    a.name.localeCompare(b.name);
+  const ranked = scored.rows.filter((r) => r.eligible).sort(byAdjusted);
+  const gatedOut = scored.rows
+    .filter((r) => !r.eligible && r.adjusted != null)
+    .sort(byAdjusted);
   return { ranked, gatedOut };
 }

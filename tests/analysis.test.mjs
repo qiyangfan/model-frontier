@@ -429,7 +429,7 @@ import {
   certifyNoBrainer,
   valueRanking,
 } from "../src/analysis.mjs";
-test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；中位成本不罚不奖", () => {
+test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；池资格 = 有输入 + 全量覆盖（无每榜短板线，ADR-0021）", () => {
   const rows = [
     {
       id: "mStrong",
@@ -448,25 +448,28 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；中位成�
       percentiles: { vals: 60, livebench: 55, arena: 58 },
     },
     {
-      id: "mGated",
-      name: "mGated",
+      // 最低百分位 30 低于旧短板线 40，但四榜全测 → 入池（ADR-0021 移除每榜否决）；
+      // floorPct 保留为描述字段
+      id: "mLowFloor",
+      name: "mLowFloor",
       complete: true,
       composite: 1300,
       cost: 100,
       percentiles: { vals: 95, livebench: 92, arena: 30 },
     },
   ];
-  const out = adjustedScores(rows, { lambda: 10, gatePct: 40 });
+  const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
   // cost=200 → log2(2)=1 → 1200−10=1190
   assert.equal(by.mStrong.adjusted, 1190);
   // cost=100 → log2(1)=0 → 不罚不奖
   assert.equal(by.mMedian.adjusted, 1100);
-  // 短板线：最低源百分位 30 < 40 → 不入池，且 reason 诚实说明
-  assert.equal(by.mGated.eligible, false);
-  assert.match(by.mGated.reason, /短板/);
+  assert.equal(by.mLowFloor.eligible, true);
+  assert.equal(by.mLowFloor.floorPct, 30);
+  // 缺 complete 字段 fail-closed：不入池
+  const noField = adjustedScores([{ ...by.mStrong, complete: undefined }]);
+  assert.equal(noField.rows[0].eligible, false);
   assert.equal(out.lambda, 10);
-  assert.equal(out.gatePct, 40);
 });
 
 test("certifyNoBrainer: λ 全区间不变 + 无支配违规 → 认证；分叉 → 不认证", () => {
@@ -552,8 +555,8 @@ test("certifyNoBrainer: 支配一致性违规可被检出（防公式回归）",
 });
 
 test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达标也不入池", () => {
-  // 2026-11-11 裁定：认证是对全维度的断言，未测榜单无短板证据也无强度证据，
-  // 池成员资格要求全量榜单覆盖（详见 docs/adr/0019 修订记录）
+  // 2026-11-11 裁定（ADR-0021 维持）：池成员资格要求全量榜单覆盖——未测榜单无强度证据；
+  // 覆盖选择性偏差（缺的榜可能是会暴露弱点的榜）使部分覆盖的 composite 与全量覆盖不可比
   const rows = [
     {
       id: "partialStrong",
@@ -564,14 +567,6 @@ test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达�
       percentiles: { vals: 96, livebench: 94 },
     },
     {
-      id: "bothBad",
-      name: "bothBad",
-      composite: 1200,
-      cost: 50,
-      complete: false,
-      percentiles: { vals: 35, livebench: 60 },
-    },
-    {
       id: "fullOk",
       name: "fullOk",
       composite: 1100,
@@ -580,18 +575,15 @@ test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达�
       percentiles: { vals: 70, livebench: 65, arena: 72, aa: 68 },
     },
   ];
-  const out = adjustedScores(rows, { lambda: 10, gatePct: 40 });
+  const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
-  // 已测维度 96/94 全部 ≥40，仍因覆盖不全被拒
+  // 已测维度 96/94 全部很高，仍因覆盖不全被拒，reason 诚实说明证据缺口
   assert.equal(by.partialStrong.eligible, false);
   assert.equal(by.partialStrong.floorPct, 94);
   assert.equal(by.partialStrong.covered, 2);
   assert.match(by.partialStrong.reason, /仅 2 榜/);
-  assert.match(by.partialStrong.reason, /未测榜单/);
-  // 短板与覆盖不全同时成立时，reason 报告更具体的短板线
-  assert.equal(by.bothBad.eligible, false);
-  assert.match(by.bothBad.reason, /短板线/);
-  assert.ok(!/未测榜单/.test(by.bothBad.reason));
+  // 有输入 → 调整分照常产出（是否入池不影响调整分计算）
+  assert.equal(Number.isFinite(by.partialStrong.adjusted), true);
   // fail-closed：complete 字段缺失按不完整处理
   const noField = adjustedScores([
     {
@@ -604,7 +596,7 @@ test("adjustedScores: 覆盖门——部分覆盖模型即使已测维度全达�
   ]);
   assert.equal(noField.rows[0].eligible, false);
   assert.equal(noField.rows[0].complete, false);
-  // 全量覆盖 + 短板线达标 → 入池
+  // 全量覆盖 → 入池
   assert.equal(by.fullOk.eligible, true);
   assert.equal(by.fullOk.complete, true);
   // 只有部分覆盖模型 → 池空，pick 为 null，不认证
@@ -670,12 +662,23 @@ test("valueRanking: 入池按调整分降序占名次，并列按综合分、名
       percentiles: full,
     },
     {
+      // 池外续排用：覆盖不全（3/4），调整分 1300−10·log2(1)=1300
       id: "gated",
       name: "gated",
-      complete: true,
+      complete: false,
       composite: 1300,
       cost: 100,
-      percentiles: { vals: 95, livebench: 92, arena: 30, aa: 80 },
+      percentiles: { vals: 95, livebench: 92, aa: 80 },
+    },
+    {
+      // 池外续排用：覆盖不全（3/4）但调整分更高（1400−10·log2(2)=1390），
+      // 输入顺序故意排在 gated 之后，验证 gatedOut 也按同一排序键续排
+      id: "gatedHigh",
+      name: "gatedHigh",
+      complete: false,
+      composite: 1400,
+      cost: 200,
+      percentiles: { vals: 95, livebench: 92, aa: 90 },
     },
     {
       id: "noInput",
@@ -687,16 +690,16 @@ test("valueRanking: 入池按调整分降序占名次，并列按综合分、名
     },
   ];
   const { ranked, gatedOut } = valueRanking(
-    adjustedScores(rows, { lambda: 10, gatePct: 40 }),
+    adjustedScores(rows, { lambda: 10 }),
   );
   // 输入顺序与名次无关，断言完整排序序列
   assert.deepEqual(
     ranked.map((r) => r.id),
     ["a", "d", "c", "b", "e2", "e1"],
   );
-  // 池外只收有调整分的行：短板行入尾表，无综合分/成本的行不收
+  // 池外只收有调整分且覆盖不全的行，按调整分续排；无综合分/成本的行不收
   assert.deepEqual(
     gatedOut.map((r) => r.id),
-    ["gated"],
+    ["gatedHigh", "gated"],
   );
 });

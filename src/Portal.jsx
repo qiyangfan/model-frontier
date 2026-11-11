@@ -332,17 +332,16 @@ export function Overview({
           ) : verdict.cert.poolSize > 0 ? (
             <>
               <p className="m-0 mb-[10px] text-[12px] leading-[1.9] text-[#627987] max-760:text-[11px]">
-                性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；任一榜单存在短板（百分位低于
-                40）或实测不全的模型，已剔除。
+                性能与成本的综合权衡（帕累托式），不是纯能力榜：每贵一倍须明显更强才不亏；四榜全部实测的模型进入正式排名，实测不全的按性价比续排在下方（无加冕资格）。
               </p>
               {verdict.cert.poolSize === 1 ? (
                 <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
-                  唯一通过全量实测与短板筛选的候选，作为默认首选（ADR-0019）。
+                  唯一通过四榜全量实测的候选，作为默认首选。
                 </p>
               ) : verdict.cert.certified ? (
                 <p className="m-0 mb-[12px] text-[12px] leading-[1.9] text-[#3d5a55] max-760:text-[11px]">
                   认证通过：「每贵一倍扣几分」从 0 调到
-                  40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健（ADR-0019）。
+                  40，首选都是同一个——即通过筛选的候选中综合能力最强者，对各种预算观感都稳健。
                 </p>
               ) : (
                 <>
@@ -401,37 +400,35 @@ export function Overview({
               {verdict.ranking.gatedOut.length ? (
                 <div className="mt-[10px] border-t border-line pt-[10px]">
                   <div className="mb-[4px] text-[10px] font-[650] tracking-[0.06em] text-[#7b958d]">
-                    未入池
+                    未入池 · 实测不全（按性价比续排，无加冕资格）
                   </div>
                   {verdict.ranking.gatedOut.map((r) => (
                     <div
                       key={r.id}
                       className="flex items-center justify-between gap-[8px] text-[12px] leading-[1.9] max-760:text-[11px]"
                     >
-                      {/* 灰显名称与入池榜单区分（ADR/spec 的「未入池灰显尾表」）；
-                          原因文字本身已是弱化色，不再叠 opacity 以免 12px 小字对比度不足 */}
+                      {/* 灰显名称与入池榜单区分；原因文字本身已是弱化色，
+                          不再叠 opacity 以免 12px 小字对比度不足 */}
                       <span className="opacity-70">
                         {nameCell(r, onSelect)}
                       </span>
-                      <span className="flex-shrink-0 text-[#627987]">
-                        {r.complete
-                          ? `最低百分位 ${r.floorPct.toFixed(0)}`
-                          : `仅 ${r.covered}/${analysis.sources.length} 榜实测`}
+                      <span className="flex-shrink-0 tabular-nums text-[#627987]">
+                        {r.adjusted?.toFixed(0) ?? "—"} · 仅 {r.covered}/
+                        {analysis.sources.length} 榜实测
                       </span>
                     </div>
                   ))}
                 </div>
               ) : null}
               <p className="mt-[12px] mb-0 text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
-                调整分 = 综合分 − 10·log2(成本指数/100)，成本指数
-                100=池中位（ADR-0019）。
+                调整分 = 综合分 − 10·log2(成本指数/100)，成本指数 100=池中位。
               </p>
             </>
           ) : (
             <Empty
               description={
                 verdict.hasInput
-                  ? "无候选同时满足：全榜单有实测，且任一榜单都没有短板（百分位 ≥40）"
+                  ? "无候选同时满足：四榜全部有有效实测分"
                   : "无模型同时具备综合分与综合成本，未产生调整分"
               }
             />
