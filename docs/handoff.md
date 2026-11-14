@@ -1,8 +1,12 @@
 # Handoff
 
-最后更新：2026-11-11。**最新一轮：编程分轴选型修订（ADR-0022 修订）——编程分从「编程 / 长程代理 / 浏览器操作」改为「编程 / 长程代理 / 数据分析」后端三件套（owner 质询浏览器轴锚错专项引出）；LiveBench coding 轴查证为 Python/算法类非前端榜，7 轴 suites 整包覆盖恒 29，轴选择无置 null 顾虑；融合排名、CSV、API 零改动，编程榜序微调（Carbon 升 #1）。验收全绿（coverage/build/lint；E2E 3×3/3；单测 32/32）。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-14。**最新一轮：移除 source-health 每日定时巡检（ADR-0014 修订）——删除 `.github/workflows/source-health.yml`，源站健康观察回归本地日常刷新（启动即全量刷新）；门禁走确定性夹具、不绑源站的核心决策不变；纯 CI 元数据/文档改动，src 零改动。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：编程分轴选型修订——browser 换 data_analysis（2026-11-11，ADR-0022 修订）
+## 最新一轮：移除 source-health 每日定时巡检（2026-11-14，ADR-0014 修订）
+
+owner 指示「干掉它」。删除 `.github/workflows/source-health.yml`（每日 02:23 UTC `npm run refresh` 巡检 + 手动触发），同步改 `ci.yml` 注释、README、ROADMAP；理由与裁定归档于 ADR-0014 修订记录：巡检信号无消费者（单 owner 下 GitHub 失败标记无告警通道）、owner 每日启动即全量刷新使云端巡检「最长一天」的发现延迟反而更慢、Actions billing 锁定期间该工作流从未成功运行纯噪音。ADR-0007「后续修订」补记。纯 CI 元数据/文档改动，src 与测试零改动，未跑验证电池（无代码路径受影响）。**注意：删除尚在本地工作区，随下次提交推送 main 后 GitHub 侧定时触发才真正停止。**
+
+## 上一轮：编程分轴选型修订——browser 换 data_analysis（2026-11-11，ADR-0022 修订）
 
 owner 连环质询（「编程维度为什么需要浏览器操作？无浏览器操作的模型不公平？后端代码需要浏览器吗？」「coding 是前端还是后端？感觉 coding 榜多指前端，agent/长任务/推理/数学才代表后端」）。实证三层：①LiveBench suites 整包发布，7 轴在池内覆盖恒 29——轴选择从不产生额外置 null，浏览器缺失「不公平」无现实受害者；②失真方向相反：browser 分位高×编码分位低的模型被抬进编程榜（MiniMax-M3.1-Flash coding36/browser76、Kimi K3 coding15/browser64），「强编码×未接浏览器」当前 0 例；③LiveBench coding 轴是 Python/算法类任务非前端榜（前端形态在 design 轴），另有 data_analysis（SQL/表格）轴是现成的后端栈证据。裁定（ADR-0022 修订记录）：**编程分 = 编程 + 长程代理 + 数据分析三轴均分**；browser 删（锚错专项，双向失真）；reasoning 拒（与 coding 秩相关 0.448——通用轴非后端代理，混入即镜头漂移回综合，且 owner 早前明言不在乎数学推理）；research/design 同理非后端。覆盖零损失、头部成员不变仅序微调（Carbon 升 #1）。改动：codingIndices AXES、编程视图 intro 文案、spec 编程 Scenario、codingIndices 单测重写。**坑：审计脚本两次踩同一盲区——valueRanking 返回行是裁剪对象（无 representatives），按 id 回联原始 rows 才能取 suites。**
 
@@ -131,7 +135,7 @@ owner 随后三点追问（40 取值多方认证 / 认真评估 2/4 / 锚点不�
 - **`no_proxy` 回环豁免别删**：启动器先 export 代理再跑 `/api/status` 探活，不豁免 127.0.0.1 的话探活请求会进代理，「已经运行」复用判断失效。
 - **启动刷新只看 `FRONTIER_AUTO_REFRESH`、不看刷新间隔设置**：「每次启动都刷」是 owner 点名语义；刷新间隔只管运行期 60 秒定时器的 `refreshDue()` 节奏。彻底关自动抓取仍用 `FRONTIER_AUTO_REFRESH=0`（手动 `/api/refresh` 仍可用）。
 - **代理地址变化时**：改 `启动模型前沿.command` 里的地址，或启动前自行 export 覆盖（`${var:-}` 语义，环境变量优先）。
-- **CI 不受影响**：runner 网络可直连 HF，`npm run refresh` 巡检照旧；PR 门禁仍走夹具（ADR-0014）。
+- **真实抓取与 CI 已彻底解耦**：runner 网络可直连 HF 曾让定时巡检工作流可行，但该工作流已于 2026-11-14 移除（ADR-0014 修订）；PR 门禁仍走夹具（ADR-0014），`npm run refresh` 只在本地跑。
 
 ## 上一轮：前沿图修饰键滚轮缩放（2026-10-30）
 

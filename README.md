@@ -135,4 +135,4 @@ Arena 数据取自 Hugging Face，直连不可达的网络环境需经代理抓�
 - `docs/adr/`：架构决策记录（单服务不换栈、分享链接契约、量化口径基准、门禁选型）。
 - `openspec/`：轻量规格约定，沉淀分享链接与融合评分两项核心契约。
 
-质量门禁：ESLint（`--max-warnings 0`）、Stylelint、Prettier、单测覆盖率阈值（行 92% / 分支 85% / 函数 90%）。CI（GitHub Actions）运行静态检查、带阈值的单测、构建，并用确定性夹具跑三套 Chrome E2E（不访问源站）；真实源站抓取的健康由独立的每日巡检工作流检查（`docs/adr/0014`）。本地交付也必须跑三套 E2E（`docs/adr/0004`）。
+质量门禁：ESLint（`--max-warnings 0`）、Stylelint、Prettier、单测覆盖率阈值（行 92% / 分支 85% / 函数 90%）。CI（GitHub Actions）运行静态检查、带阈值的单测、构建，并用确定性夹具跑三套 Chrome E2E（不访问源站，`docs/adr/0014`）；真实源站抓取的健康由本地日常刷新覆盖（每次启动即全量刷新，`docs/adr/0014` 修订记录）。本地交付也必须跑三套 E2E（`docs/adr/0004`）。

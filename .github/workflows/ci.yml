@@ -34,7 +34,7 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
       # E2E 使用仓库内确定性夹具，PR 门禁不访问任何源站（ADR-0014）；
-      # 真实抓取的可用性与适配器漂移由独立的 source-health 工作流巡检。
+      # 真实抓取的可用性与适配器漂移由 owner 本地日常刷新（启动即全量刷新）与适配器单测覆盖。
       # 夹具内容的缓存时间按运行时刻刷新，数据行保持固定。
       - name: 准备确定性 E2E 数据
         run: node tests/prepare-fixture.mjs "$RUNNER_TEMP/frontier-data"
