@@ -1,8 +1,18 @@
 # Handoff
 
-最后更新：2026-11-14。**最新一轮：移除 source-health 每日定时巡检（ADR-0014 修订）——删除 `.github/workflows/source-health.yml`，源站健康观察回归本地日常刷新（启动即全量刷新）；门禁走确定性夹具、不绑源站的核心决策不变；纯 CI 元数据/文档改动，src 零改动。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-15。**最新一轮：Arena 源代理自动探测——裸跑 `npm start` / `dev` / `refresh` 不再需要预设代理变量或双击启动器；发现链 = 环境变量 → 系统代理设置（macOS scutil，探活后才采用）→ 常见端口探测（`FRONTIER_PROXY_PORTS` 可插队），全落空则直连。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：移除 source-health 每日定时巡检（2026-11-14，ADR-0014 修订）
+## 最新一轮：Arena 源代理自动探测（2026-11-15）
+
+- **根因**：owner 手动刷新时 shell 无代理环境变量，Arena（Hugging Face parquet）`fetch failed` 停在 11-13 快照，其余三站正常。此前方案是启动器写死导出 15732，裸跑必挂（owner 两次踩坑后裁定：不许写死端口、不许「必须走启动器」，要自动探测）。
+- **实证**：Node 24 三种时机对照——启动前有变量 200；启动后再设 `process.env` 超时（EnvHttpProxyAgent 只在进程启动时读一次环境）；直连超时。⇒ 探测必须在子进程启动前完成，包装器方案由此成立。
+- **实现**：`server/proxyEnv.mjs` 纯逻辑（`parseScutilOutput` 只认启用中的通道、HTTPS 优先；`probePort` 仅 TCP 探活 400ms；`resolveProxyEnv` 依赖可注入供测试；`applyProxyEnv` 大小写变量都写 + 回环豁免只补缺不覆盖）+ `scripts/with-proxy.mjs` 薄壳（探测 → 注入 → `spawnSync` 真入口，日志打「已启用代理（来源：…）/未发现可用代理」）。`package.json` 三脚本改走包装器；启动器删 15732 写死段（保留 `no_proxy` 豁免保自家探活 curl）；README / AGENTS.md 已知坑同步。
+- **坑**：scutil 输出行首有缩进，锚定字段名的正则须容 `^\s*`（首版单测即红，一次修正）。
+- **运维语义**：Arena 失败而其余三站正常时，第一嫌疑从「忘了走启动器」变为「代理没找到」——看启动日志首行即可定位；端口非常见且系统设置未登记时用 `FRONTIER_PROXY_PORTS` 指定，无需改代码。
+- **归档**：运维/基建改动，不触及量化口径、分享契约、架构（无 ADR）；`openspec/changes/` 无在途提案，specs（仅 ranking、share-link）不覆盖代理发现能力——本轮无可归档变更。
+- **验证与评审**：单测 167/167（含代理探测 13 项）、覆盖率 98.93/91.97/97.35 过门禁、构建、lint 零告警、新文件 prettier 全过、夹具 E2E `errors: []`；裸跑实测两发——`npm start` 与 `npm run refresh`（环境 0 个代理变量）均「已启用代理（来源：系统代理设置）」+ 四源 success。评审循环全量溯源零缺陷：CI ubuntu 裸跑 `npm start` 行为等价（linux 短路跳过 scutil、探测端口全 refused 毫秒级、直连同旧）、探活劫持三处闭合（applyProxyEnv 恒补豁免 / 启动器 curl 保留豁免 / 服务端零本地自请求）、死端口残留与空串变量均有防御。
+
+## 上一轮：移除 source-health 每日定时巡检（2026-11-14，ADR-0014 修订）
 
 owner 指示「干掉它」。删除 `.github/workflows/source-health.yml`（每日 02:23 UTC `npm run refresh` 巡检 + 手动触发），同步改 `ci.yml` 注释、README、ROADMAP；理由与裁定归档于 ADR-0014 修订记录：巡检信号无消费者（单 owner 下 GitHub 失败标记无告警通道）、owner 每日启动即全量刷新使云端巡检「最长一天」的发现延迟反而更慢、Actions billing 锁定期间该工作流从未成功运行纯噪音。ADR-0007「后续修订」补记。纯 CI 元数据/文档改动，src 与测试零改动，未跑验证电池（无代码路径受影响）。**注意：删除尚在本地工作区，随下次提交推送 main 后 GitHub 侧定时触发才真正停止。**
 
