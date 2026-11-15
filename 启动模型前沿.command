@@ -2,12 +2,8 @@
 set -e
 cd -- "${0:A:h}"
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/share/mise/installs/node/24/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-# Hugging Face（Arena 数据源）直连不通，需走本地代理；Node 24 内置 fetch 默认不读
-# http_proxy/https_proxy，必须 NODE_USE_ENV_PROXY=1 显式开启。已有环境变量则不覆盖。
-export NODE_USE_ENV_PROXY=1
-export http_proxy="${http_proxy:-http://127.0.0.1:15732}"
-export https_proxy="${https_proxy:-http://127.0.0.1:15732}"
-# 回环地址不进代理，保证下方 /api/status 探活与服务端口不受影响
+# 代理不再在这里写死：npm start 内置自动探测（环境变量 → 系统代理设置 → 常见端口），
+# 见 scripts/with-proxy.mjs。这里只保留回环豁免，保证下方探活 curl 不被代理劫持。
 export no_proxy="localhost,127.0.0.1"
 export NO_PROXY="localhost,127.0.0.1"
 if ! command -v node >/dev/null 2>&1; then
