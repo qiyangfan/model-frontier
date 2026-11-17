@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyze } from "../src/analysis.mjs";
+import { colorFor } from "../src/presentation.mjs";
 import {
   VENDOR_CHIPS,
   compareNullableScores,
@@ -74,7 +75,13 @@ test("display filters preserve original rank and scores", () => {
     [rows[1]],
   );
   assert.equal(filterModels(rows, { openness: "unknown" })[0].id, "c");
-  assert.equal(filterModels(rows, { creator: "Other" }).length, 1);
+  // 厂商多选：空集合等于全部，非空集合按任一命中保留（叠加筛选语义）
+  assert.equal(filterModels(rows, { creators: ["Other"] }).length, 1);
+  assert.deepEqual(
+    filterModels(rows, { creators: ["Lab", "Other"] }).length,
+    3,
+  );
+  assert.equal(filterModels(rows, { creators: [] }).length, 3);
   assert.equal(rows[1].rank, 2);
 });
 test("single source ranking keeps full configurations and no cost requirement; estimates and history opt in", () => {
@@ -381,6 +388,13 @@ test("vendor chip counts use the full pool, skip creator-less rows, and keep chi
   assert.equal(byValue.Kimi, 1);
   assert.equal(byValue.Anthropic, 0);
   assert.equal(byValue["Z AI"], 0);
+});
+test("vendor chip creators get pairwise-distinct vendor colors (chip dots, chart dots, rings share the mapping)", () => {
+  // 点身/chip/描边/浮层共用 colorFor：固定厂商撞色=图上两个厂商无法区分。
+  // VENDOR_CHIPS 增删时此测试强制重新核对手工配色表。
+  const colors = VENDOR_CHIPS.map((chip) => colorFor(chip.value));
+  assert.equal(new Set(colors).size, VENDOR_CHIPS.length, "厂商色出现撞色");
+  for (const color of colors) assert.match(color, /^#[0-9a-f]{6}$/);
 });
 test("evidence depth summarizes ranked count and shared-board match distribution", () => {
   const rows = [

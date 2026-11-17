@@ -21,6 +21,7 @@ const DEFAULTS = {
   onlyFront: false,
   query: "",
   paretoQuery: "",
+  paretoVendors: [],
   view: "fusion",
   rankingQuery: "",
   creator: "",
@@ -62,6 +63,8 @@ const TEXT_KEYS = {
   query: "q",
   paretoQuery: "pq",
   rankingQuery: "rq",
+  // 厂商筛选：探索页与排行榜共用 cr。多选时以「|」分隔编码（如 cr=A|B），
+  // 单选的旧链接是无分隔符的单值，两种编码互通可解码。
   creator: "cr",
 };
 const numberIn = (value, min, max) => {
@@ -106,6 +109,16 @@ export function encodeShareState(state = {}) {
     .map((id) => (id.length > MAX_TEXT ? id.slice(0, MAX_TEXT) : id))
     .slice(0, 4);
   if (selection.length) params.set("sel", selection.join(","));
+  // 帕累托图厂商快选 chips：数组以「|」连接，独立于自由文本搜索 pq；
+  // 与 sel 同样的去重与截断纪律，超量直接丢弃而非截半（截半会出现半个厂商名）。
+  const paretoVendors = [
+    ...new Set(
+      (Array.isArray(state.paretoVendors) ? state.paretoVendors : []).filter(
+        (v) => typeof v === "string" && v,
+      ),
+    ),
+  ].slice(0, 12);
+  if (paretoVendors.length) params.set("pv", paretoVendors.join("|"));
   return params.toString();
 }
 export function decodeShareState(hash = "") {
@@ -157,6 +170,18 @@ export function decodeShareState(hash = "") {
     ),
   ].slice(0, 4);
   if (selection.length) state.selection = selection;
+  const pv = params.get("pv");
+  if (pv != null) {
+    const vendors = [
+      ...new Set(
+        pv
+          .split("|")
+          .filter(Boolean)
+          .map((v) => (v.length > MAX_TEXT ? v.slice(0, MAX_TEXT) : v)),
+      ),
+    ].slice(0, 12);
+    if (vendors.length) state.paretoVendors = vendors;
+  }
   return { page: rawPage, state };
 }
 export function shareHash(page, state = {}) {

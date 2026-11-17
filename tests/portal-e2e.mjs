@@ -354,9 +354,14 @@ try {
       .waitFor();
   }
   await coverageSummary.click();
-  // 厂商快捷筛选：chip 与厂商下拉同源，激活态写入分享链接，再次点击取消
-  await page.locator(".creator-chip", { hasText: "DeepSeek" }).click();
-  await page.waitForFunction(() => location.hash.includes("cr="));
+  // 厂商快捷筛选：chip 多选叠加、再次点击反选，激活态以「|」并入 cr 写入分享链接
+  await page
+    .locator(".ranking-table .creator-chip", { hasText: "DeepSeek" })
+    .click();
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    return params.get("cr") === "DeepSeek";
+  });
   assert.ok(
     (await page.locator(".ranking-main-table tr[data-row-key]").count()) > 0,
   );
@@ -365,9 +370,43 @@ try {
       ...document.querySelectorAll(".ranking-main-table tr[data-row-key]"),
     ].every((r) => r.textContent.includes("DeepSeek")),
   );
-  await page.locator('.creator-chip[aria-pressed="true"]').click();
+  // 叠加 Kimi：两厂商并存，行都来自其中之一；反选 DeepSeek 后只剩 Kimi
+  await page
+    .locator(".ranking-table .creator-chip", { hasText: "Kimi" })
+    .click();
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    return params.get("cr") === "DeepSeek|Kimi";
+  });
+  await page.waitForFunction(() => {
+    const rows = [
+      ...document.querySelectorAll(".ranking-main-table tr[data-row-key]"),
+    ];
+    return (
+      rows.length > 0 &&
+      rows.every(
+        (r) =>
+          r.textContent.includes("DeepSeek") || r.textContent.includes("Kimi"),
+      )
+    );
+  });
+  await page
+    .locator(".ranking-table .creator-chip", { hasText: "DeepSeek" })
+    .click();
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    return params.get("cr") === "Kimi";
+  });
+  await page.waitForFunction(() =>
+    [
+      ...document.querySelectorAll(".ranking-main-table tr[data-row-key]"),
+    ].every((r) => r.textContent.includes("Kimi")),
+  );
+  await page
+    .locator('.ranking-table .creator-chip[aria-pressed="true"]')
+    .click();
   await page.waitForFunction(() => !location.hash.includes("cr="));
-  // 探索页表格厂商过滤与帕累托搜索互相独立。
+  // 探索页表格厂商过滤与帕累托快选互相独立。
   await tab("前沿探索");
   await page
     .getByRole("combobox", { name: "表格厂商筛选", exact: true })
@@ -376,6 +415,8 @@ try {
     .getByRole("combobox", { name: "表格厂商筛选", exact: true })
     .fill("Kimi");
   await page.getByRole("option", { name: "Kimi", exact: true }).click();
+  // 多选下拉选完不自动收起，先关掉再继续，避免遮挡后续点击
+  await page.keyboard.press("Escape");
   await page.waitForFunction(() => location.hash.includes("cr=Kimi"));
   assert.ok((await page.locator(".models-panel tr[data-row-key]").count()) > 0);
   await page.waitForFunction(() =>
@@ -383,28 +424,44 @@ try {
       (r) => r.textContent.includes("Kimi"),
     ),
   );
+  // 帕累托快选 chips：点击写入 pv（不再镜像进搜索框），多选叠加、再次点击反选
   await page
     .locator(".pareto-vendor-search .creator-chip", { hasText: "DeepSeek" })
     .click();
   await page.waitForFunction(() => {
     const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
-    return params.get("cr") === "Kimi" && params.get("pq") === "DeepSeek";
+    return params.get("cr") === "Kimi" && params.get("pv") === "DeepSeek";
   });
   assert.equal(
     await page.getByRole("textbox", { name: "帕累托搜索" }).inputValue(),
-    "DeepSeek",
+    "",
   );
   assert.match(await page.locator(".search-hint").innerText(), /全部点位保留/);
+  // 叠加 Anthropic 成双值，反选 DeepSeek 后只剩 Anthropic
+  await page
+    .locator(".pareto-vendor-search .creator-chip", { hasText: "Anthropic" })
+    .click();
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    return params.get("pv") === "DeepSeek|Anthropic";
+  });
+  await page
+    .locator(".pareto-vendor-search .creator-chip", { hasText: "DeepSeek" })
+    .click();
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    return params.get("pv") === "Anthropic";
+  });
   assert.ok(
     (await page.locator(".models-panel tr[data-row-key]").count()) > 0,
-    "帕累托搜索不应清除表格厂商过滤",
+    "帕累托快选不应清除表格厂商过滤",
   );
   await page
     .locator('.pareto-vendor-search .creator-chip[aria-pressed="true"]')
     .click();
   await page.waitForFunction(() => {
     const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
-    return params.get("pq") === null && params.get("cr") === "Kimi";
+    return params.get("pv") === null && params.get("cr") === "Kimi";
   });
   await page
     .locator('.models-panel .creator-chip[aria-pressed="true"]')

@@ -1,9 +1,37 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  colorFor,
   isDomesticCreator,
   valueFilterPredicate,
 } from "../src/presentation.mjs";
+
+test("colorFor：固定厂商恒同色且互不撞色，表外厂商稳定散列兜底", () => {
+  // 固定 10 家（VENDOR_CHIPS 全集）各得专属色——chip 色点、图上描边、浮层共用，
+  // 撞色会让两个厂商在图上无法区分
+  const fixed = [
+    "Anthropic",
+    "Google",
+    "Meta",
+    "OpenAI",
+    "Xiaomi",
+    "DeepSeek",
+    "Z AI",
+    "Kimi",
+    "StepFun",
+    "Alibaba",
+  ];
+  const colors = fixed.map(colorFor);
+  assert.equal(new Set(colors).size, fixed.length, "固定厂商出现撞色");
+  // 大小写漂移视为同一厂商：恒同色靠精确键名，映射表之外的输入走散列
+  assert.equal(colorFor("Kimi"), colorFor("Kimi"));
+  assert.notEqual(colorFor("Kimi"), colorFor("OpenAI"));
+  // 表外厂商：非空且稳定（多次调用一致）
+  assert.match(colorFor("Trillion Labs"), /^#[0-9a-f]{6}$/);
+  assert.equal(colorFor("Trillion Labs"), colorFor("Trillion Labs"));
+  // 空值也得合法色（浮层/描边不应拿到 undefined）
+  assert.match(colorFor(null), /^#[0-9a-f]{6}$/);
+});
 
 test("isDomesticCreator：小写归一匹配 creator 大小写漂移；非字符串与归属存疑厂商归 false", () => {
   assert.equal(isDomesticCreator("DeepSeek"), true);

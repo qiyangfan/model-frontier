@@ -28,6 +28,36 @@ export const costFormat = (v, source) =>
 export const formatTime = (s) =>
   s ? new Date(s).toLocaleString("zh-CN", { hour12: false }) : "尚未获取";
 
+// ══════════ 厂商专属色（编辑策划数据，仅区分身份，不承载评测语义） ══════════
+// 图上点身、chip 色点、搜索描边、悬浮浮层共用同一映射，保证同一厂商在任何视图恒同色。
+// 固定 10 家（VENDOR_CHIPS 全集）手工挑色：互不撞色，且避开全球前沿虚线蓝 #3267b8 /
+// 开放前沿实线青绿 #128574——散点落在前沿线附近，点身撞上线的颜色会被误读成线；
+// 深浅均按白底可辨取值。表外厂商走 FNV-1a 散列兜底取色，仅保证稳定不保证不撞
+// （表外厂商只出现在「全部厂商」下拉与文本标签旁，文字始终在场，撞色无害）。
+const VENDOR_COLORS = {
+  Anthropic: "#b0653a",
+  Google: "#0f6f9e",
+  Meta: "#7a4fb0",
+  OpenAI: "#2f7d3b",
+  Xiaomi: "#c2447c",
+  DeepSeek: "#4a5480",
+  "Z AI": "#9a6210",
+  Kimi: "#a83a3a",
+  StepFun: "#526e0f",
+  Alibaba: "#b5482a",
+};
+const FALLBACK_PALETTE = Object.values(VENDOR_COLORS);
+export function colorFor(creator) {
+  const s = String(creator ?? "");
+  if (VENDOR_COLORS[s]) return VENDOR_COLORS[s];
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return FALLBACK_PALETTE[h % FALLBACK_PALETTE.length];
+}
+
 // ══════════ 快速筛选：国产厂商映射（编辑策划数据，非源站字段） ══════════
 // 源站不提供厂商地区属性；此表按可确证的归属手工维护，键为小写 creator（源站
 // 大小写漂移：MiniMax/minimax、Tencent/tencent 等）。只收确证的国产厂商——归属

@@ -24,7 +24,7 @@ export function rankedModels(rows) {
 }
 export function filterModels(
   rows,
-  { query = "", creator, openness = "all", scoredOnly = false } = {},
+  { query = "", creators = [], openness = "all", scoredOnly = false } = {},
 ) {
   const needle = query.trim().toLowerCase();
   return rows.filter(
@@ -33,7 +33,7 @@ export function filterModels(
         `${r.name} ${r.configuration ?? ""} ${r.creator}`
           .toLowerCase()
           .includes(needle)) &&
-      (!creator || r.creator === creator) &&
+      (creators.length === 0 || creators.includes(r.creator)) &&
       (openness === "all" ||
         (openness === "open" && r.openWeights === true) ||
         (openness === "closed" && r.openWeights === false) ||
@@ -41,7 +41,7 @@ export function filterModels(
       (!scoredOnly || Number.isFinite(r.composite)),
   );
 }
-// 厂商快捷入口同时支持帕累托搜索和表格筛选：与「全部厂商」下拉同源于 creator 字段，不参与评分。
+// 厂商快捷入口同时支持帕累托搜索和表格筛选：与「全部厂商」下拉同源于厂商集合（多选，可叠加反选），不参与评分。
 // 固定编辑口径（非数据宣称）：全局基准 + 中国前沿各取最佳综合分领先的厂商，
 // 覆盖帕累托前沿与顶尖性能两条线；标签用常见品牌名，note 只补充品牌名看不出的事实
 // （tooltip 首段已给出源站 creator 字符串，note 不重复它）。

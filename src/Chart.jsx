@@ -22,7 +22,7 @@ import {
   MarkAreaComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { costFormat, money, NAMES } from "./presentation.mjs";
+import { costFormat, money, NAMES, colorFor } from "./presentation.mjs";
 import { isZoomed, scaledRange, wheelZoomGate } from "./chartNav.mjs";
 echarts.use([
   ScatterChart,
@@ -43,17 +43,29 @@ const LEGEND = [
   ["开放权重前沿", "frontier"],
   ["国产前沿", "cn"],
 ];
-// 图例标记样式查找表：原 .legend-marker 及 .open/.closed/.global/.frontier 变体内联
+// 图例标记样式查找表：原 .legend-marker 及 .open/.closed/.global/.frontier 变体内联。
+// 点身颜色已让位给厂商身份色，开放/闭源改由「形状」编码——图例用中性描边的
+// 空心菱形/圆圈对应，不再宣示任何实色；前沿三类仍是线段样式。
 const LEGEND_MARKERS = {
-  open: "relative inline-block mx-[1px] h-[8px] w-[8px] shrink-0 rotate-45 bg-[#128574]",
+  open: "relative inline-block mx-[1px] h-[8px] w-[8px] shrink-0 rotate-45 border-[1.5px] border-[#657b8b]",
   closed:
-    "relative inline-block h-[10px] w-[10px] shrink-0 rounded-full bg-[#3267b8]",
+    "relative inline-block h-[10px] w-[10px] shrink-0 rounded-full border-[1.5px] border-[#657b8b]",
   global:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_dashed_#3267b8]",
   frontier:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#128574]",
   cn: "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#b0653a]",
 };
+// 六位 hex 转 rgba：描边阴影等半透明样式统一从这里出，避免散落 8 位 hex
+// （zrender 对 #RRGGBBAA 的支持不一致，rgba() 是全版本可靠写法）。
+const withAlpha = (hex, alpha) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+};
+// 点位符号半径：闭源圆点 symbolSize 10、开放权重菱形 symbolSize 13 的一半。
+// 悬浮浮层的「同点位重叠」判定与顶层补点尺寸都以此为基准。
+const symbolRadius = (r) => (r.openWeights === true ? 6.5 : 5);
+
 export default function Chart({
   rows,
   focus,
@@ -231,10 +243,13 @@ export default function Chart({
         padding: [4, 7],
       },
       itemStyle: {
+        // 点身即厂商身份色（开放/闭源改由形状编码：圆点 vs 菱形），与 chip、
+        // 搜索描边、浮层标记同一映射；白描边负责在厂商色相近或点位重叠时勾缝。
+        color: colorFor(r.creator),
         borderColor: "#fff",
         borderWidth: 2,
         shadowBlur: r.openFrontier ? 9 : 0,
-        shadowColor: "rgba(14,120,102,.15)",
+        shadowColor: withAlpha(colorFor(r.creator), 0.15),
       },
     });
     const open = plot.filter((r) => r.openWeights === true),
@@ -249,26 +264,49 @@ export default function Chart({
             ] !== false,
         )
       : [];
+    // 搜索命中双层渲染：描边环按厂商专属色画出（z=10，不拦截事件，只做视觉强调），
+    // 内层再补一个同点位、同形状的实心点（z=11，可点击、可悬浮）——被邻近大点
+    // 盖住的命中模型靠这层重新露出，无需去够那条月牙边。
     const highlight = highlighted.map((r) => {
       const base = point(r);
+      const color = colorFor(r.creator);
       return {
         ...base,
         symbolSize: 21,
         itemStyle: {
           color: "transparent",
-          borderColor: "#d98a2b",
+          borderColor: color,
           borderWidth: 3,
           shadowBlur: 6,
-          shadowColor: "rgba(217,138,43,.35)",
+          shadowColor: withAlpha(color, 0.35),
         },
         label: {
           ...base.label,
           show: !(r.frontier || r.openFrontier || r.cnFrontier),
-          color: "#8a4b00",
-          backgroundColor: "#fff8ec",
-          borderColor: "#e9b56a",
+          // 前沿模型的名称牌挂在点位正上方（point() 的默认位），命中标注改挂
+          // 右侧错开，避免全局 labelLayout 的 hideOverlap 把两个牌子互相顶掉。
+          position: "right",
+          color: "#274354",
+          backgroundColor: "#fff",
+          borderColor: color,
           borderWidth: 1,
           fontWeight: 650,
+        },
+      };
+    });
+    const highlightDot = highlighted.map((r) => {
+      const open = r.openWeights === true;
+      const base = point(r);
+      return {
+        ...base,
+        symbol: open ? "diamond" : "circle",
+        symbolSize: open ? 13 : 10,
+        // 名称牌交给底层原点（前沿）或描边环（非前沿，挂右侧），顶层补点不再出牌
+        label: { ...base.label, show: false },
+        itemStyle: {
+          ...base.itemStyle,
+          shadowBlur: 6,
+          shadowColor: withAlpha(colorFor(r.creator), 0.35),
         },
       };
     });
@@ -306,8 +344,8 @@ export default function Chart({
         aria: {
           enabled: true,
           description: searchActive
-            ? `模型成本与 PK 主积分散点图，搜索命中 ${highlightIds?.size ?? 0} 个模型，图中 ${highlight.length} 个点位已用橙色描边标注；全部 ${plot.length} 个点位保留。悬浮全球前沿模型可标出它支配的区域。`
-            : "模型成本与 PK 主积分散点图，左上方代表更低成本与更高 BT 强度。悬浮全球前沿模型可标出它支配的区域；下方表格提供相同数据。",
+            ? `模型成本与 PK 主积分散点图，搜索命中 ${highlightIds?.size ?? 0} 个模型，图中 ${highlight.length} 个点位已按厂商专属色描边标注；全部 ${plot.length} 个点位保留。悬浮全球前沿模型可标出它支配的区域。`
+            : "模型成本与 PK 主积分散点图，左上方代表更低成本与更高 BT 强度。悬浮全球前沿模型可标出它支配的区域；点位重叠时悬浮浮层会列出同位置的全部模型；下方表格提供相同数据。",
         },
         grid: { left: 55, right: 35, top: 44, bottom: 78 },
         tooltip: {
@@ -322,6 +360,43 @@ export default function Chart({
           formatter: (p) => {
             const r = p.data?.row;
             if (!r) return "";
+            // 同点位重叠检测：把命中点与全部点位换算成像素，圆心距小于两半径之和
+            // 加 2px 视觉容差的视为重叠，在浮层点名——两个点几乎叠成一团时，「图上
+            // 只剩上层一个点」会造成模型消失的误读。dataZoom 缩放后换算随动，列表
+            // 自动收缩；图例关闭的系列不列入（图上看不见的才需要点名）。
+            const [px, py] = chart.convertToPixel("grid", p.value);
+            const overlaps = plot
+              .filter(
+                (o) =>
+                  o.id !== r.id &&
+                  visibility[
+                    o.openWeights === true ? "开放权重" : "闭源 / 未确认"
+                  ] !== false,
+              )
+              .map((o) => {
+                const [x, y] = chart.convertToPixel("grid", [
+                  Math.log10(o.cost),
+                  o.composite,
+                ]);
+                return { row: o, d: Math.hypot(x - px, y - py) };
+              })
+              .filter(
+                ({ row: o, d }) => d < symbolRadius(r) + symbolRadius(o) + 2,
+              )
+              .sort((a, b) => a.d - b.d);
+            const shown = overlaps.slice(0, 5);
+            const overlapHtml = overlaps.length
+              ? `<div class="mx-[18px] border-t border-t-[#edf1f4] pt-[10px] text-[10px] leading-[1.9] text-[#4b6573] whitespace-normal [overflow-wrap:anywhere]">此点位与其他 ${overlaps.length} 个模型几乎重叠：${shown
+                  .map(
+                    ({ row: o }) =>
+                      `<b style="color:${colorFor(o.creator)}">${
+                        o.openWeights === true ? "◆" : "●"
+                      }</b> ${esc(o.name)}`,
+                  )
+                  .join(
+                    "、",
+                  )}${overlaps.length > shown.length ? " 等" : ""}；可在搜索框输入名称，以厂商专属色描边定位</div>`
+              : "";
             const dollars = ["aa", "vals", "livebench"]
               .map(
                 (s) =>
@@ -332,7 +407,7 @@ export default function Chart({
             const dominated = r.dominatedBy?.length
               ? `<div class="mx-[18px] border-t border-t-[#edf1f4] py-[10px] text-[10px] leading-[1.7] text-[#a9635a] whitespace-normal [overflow-wrap:anywhere]">被 ${esc(r.dominatedBy.slice(0, 2).join("、"))}${r.dominatedBy.length > 2 ? ` 等 ${r.dominatedBy.length} 个前沿模型` : ""}同时以更低成本、更高 PK 主积分支配</div>`
               : "";
-            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div><div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">三站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/3 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : r.cnFrontier ? "国产前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
+            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div>${overlapHtml}<div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">三站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/3 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : r.cnFrontier ? "国产前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
           },
         },
         legend: {
@@ -457,15 +532,10 @@ export default function Chart({
             type: "scatter",
             data: closed.map(point),
             symbolSize: 10,
-            itemStyle: {
-              color: "#3267b8",
-              opacity: 1,
-            },
+            // 点色由每个点的 itemStyle 按厂商给出（见 point()），系列层只管透明度
+            itemStyle: { opacity: 1 },
             labelLayout: { hideOverlap: true, moveOverlap: "shiftY" },
-            emphasis: {
-              scale: 1.5,
-              itemStyle: { opacity: 1, color: "#234e91" },
-            },
+            emphasis: { scale: 1.5, itemStyle: { opacity: 1 } },
             z: 3,
           },
           {
@@ -474,9 +544,9 @@ export default function Chart({
             data: open.map(point),
             symbol: "diamond",
             symbolSize: 13,
-            itemStyle: { color: "#128574", opacity: 0.94 },
+            itemStyle: { opacity: 0.94 },
             labelLayout: { hideOverlap: true, moveOverlap: "shiftY" },
-            emphasis: { scale: 1.5, itemStyle: { color: "#065f50" } },
+            emphasis: { scale: 1.5 },
             z: 4,
           },
           {
@@ -486,13 +556,20 @@ export default function Chart({
             symbolSize: 21,
             itemStyle: {
               color: "transparent",
-              borderColor: "#d98a2b",
-              borderWidth: 3,
             },
             labelLayout: { hideOverlap: true, moveOverlap: "shiftY" },
             silent: true,
             z: 10,
             tooltip: { show: false },
+          },
+          {
+            // 顶层补点：让被邻近点盖住的命中模型重新可见、可直接悬浮与点击打开详情；
+            // 悬浮时走全局 item 浮层，显示的是命中模型自己的完整卡片。
+            name: "搜索命中点",
+            type: "scatter",
+            data: highlightDot,
+            labelLayout: { hideOverlap: true, moveOverlap: "shiftY" },
+            z: 11,
           },
         ],
       },
@@ -660,7 +737,8 @@ export default function Chart({
         <DragOutlined aria-hidden="true" className="text-[12px]" />
         <span>
           左上方更优。悬浮任一全球前沿模型，即标出它同时以更低成本、更高 PK
-          主积分支配的区域；拖动平移，⌘/Ctrl + 滚轮缩放，滚轮用于页面滚动
+          主积分支配的区域；点位挤在一起时，悬浮浮层会点名同位置的全部模型；拖动平移，⌘/Ctrl
+          + 滚轮缩放，滚轮用于页面滚动
         </span>
       </div>
     </div>

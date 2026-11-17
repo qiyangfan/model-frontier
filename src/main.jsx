@@ -45,6 +45,7 @@ import Chart from "./Chart.jsx";
 import {
   NAMES,
   COSTS,
+  colorFor,
   costFormat,
   money,
   formatTime,
@@ -87,10 +88,17 @@ const matchesSearch = (row, query) => {
   const needle = query.trim().toLowerCase();
   return !needle || `${row.name} ${row.creator}`.toLowerCase().includes(needle);
 };
+// cr 链接参数的厂商集合编码：单选旧链接是无分隔符的单值，多选以「|」连接，
+// 两种编码共用同一拆分入口，保证旧分享链接继续可用。
+const splitCreators = (value) =>
+  String(value ?? "")
+    .split("|")
+    .filter(Boolean);
 const compareComposite = compareNullableScores((r) => r.composite);
 const compareAuxiliary = compareNullableScores((r) => r.auxiliary);
-function VendorSearchChips({ chips, query, onSearch }) {
-  const activeQuery = query.trim().toLowerCase();
+// 帕累托厂商快选 chips：多选叠加、再次点击反选，与上方搜索框互相独立（合并命中）。
+// 每个厂商带专属色点，激活态用同色描边与浅底强调；选中的厂商在图上以同色描边标出。
+function VendorSearchChips({ chips, vendors, onToggle }) {
   return (
     <div
       className="pareto-vendor-search flex flex-wrap items-center gap-[7px]"
@@ -101,8 +109,9 @@ function VendorSearchChips({ chips, query, onSearch }) {
         厂商快速搜索
       </span>
       {chips.map((chip) => {
-        const active = activeQuery === chip.value.toLowerCase();
+        const active = vendors.includes(chip.value);
         const empty = chip.count === 0;
+        const color = colorFor(chip.value);
         return (
           <button
             key={chip.value}
@@ -110,21 +119,31 @@ function VendorSearchChips({ chips, query, onSearch }) {
             aria-pressed={active}
             disabled={empty && !active}
             title={
-              `搜索 ${chip.value} 并在帕累托图中标记命中模型` +
+              `在帕累托图中以厂商色标记 ${chip.value} 的模型` +
               (chip.note ? ` · ${chip.note}` : "") +
-              (active ? "；再次点击清除搜索" : "")
+              (active ? "；再次点击反选该厂商" : "")
+            }
+            style={
+              active
+                ? { borderColor: color, backgroundColor: color + "1a" }
+                : undefined
             }
             className={
               "creator-chip inline-flex items-center gap-[5px] rounded-full border px-[10px] py-[2px] text-[11px] leading-[1.7] transition-colors " +
               (active
-                ? "border-[#128574] bg-[#eaf5f1] font-medium text-[#0c6e5e]"
+                ? "font-medium text-[#274354]"
                 : "border-[#dce7e3] bg-white text-[#5f7c74] hover:border-[#a8cdc0] hover:text-[#2c6f60]") +
               (empty && !active
                 ? " cursor-not-allowed opacity-40"
                 : " cursor-pointer")
             }
-            onClick={() => onSearch(active ? "" : chip.value)}
+            onClick={() => onToggle(chip.value)}
           >
+            <span
+              aria-hidden="true"
+              className="inline-block h-[8px] w-[8px] shrink-0 rounded-full"
+              style={{ background: color }}
+            />
             {chip.label}
           </button>
         );
@@ -186,7 +205,10 @@ function App() {
     [focus, setFocus] = useState(shared.focus ?? prefs.focus ?? "openFirst"),
     [query, setQuery] = useState(shared.query ?? ""),
     [paretoQuery, setParetoQuery] = useState(shared.paretoQuery ?? ""),
-    [creator, setCreator] = useState(shared.creator || undefined),
+    [creators, setCreators] = useState(() => splitCreators(shared.creator)),
+    [paretoVendors, setParetoVendors] = useState(
+      () => shared.paretoVendors ?? [],
+    ),
     [estimated, setEstimated] = useState(
       shared.includeEstimated ?? prefs.includeEstimated === true,
     ),
@@ -205,7 +227,7 @@ function App() {
     [ranking, setRanking] = useState(() => ({
       view: shared.view ?? "fusion",
       query: shared.rankingQuery ?? "",
-      creator: shared.creator || undefined,
+      creators: splitCreators(shared.creator),
       openness: shared.openness ?? "all",
       scoredOnly: shared.scoredOnly === true,
       coverageMaskId: shared.coverageMaskId ?? "",
@@ -257,7 +279,8 @@ function App() {
       setFocus(state.focus ?? "openFirst");
       setQuery(state.query ?? "");
       setParetoQuery(state.paretoQuery ?? "");
-      setCreator(state.creator || undefined);
+      setParetoVendors(state.paretoVendors ?? []);
+      setCreators(splitCreators(state.creator));
       setOnlyFront(state.onlyFront === true);
       setBudgetSource(state.budgetSource ?? "none");
       setBudgetLimit(state.budgetLimit ?? null);
@@ -267,7 +290,7 @@ function App() {
       setRanking((previous) => ({
         view: state.view ?? "fusion",
         query: state.rankingQuery ?? "",
-        creator: state.creator || undefined,
+        creators: splitCreators(state.creator),
         openness: state.openness ?? "all",
         scoredOnly: state.scoredOnly === true,
         coverageMaskId: state.coverageMaskId ?? "",
@@ -477,18 +500,24 @@ function App() {
       chartRows.filter(
         (r) =>
           matchesSearch(r, query) &&
-          (!creator || r.creator === creator) &&
+          (creators.length === 0 || creators.includes(r.creator)) &&
           (!onlyFront || r.frontier || r.openFrontier || r.cnFrontier),
       ),
-    [chartRows, query, creator, onlyFront],
+    [chartRows, query, creators, onlyFront],
   );
-  const searchActive = paretoQuery.trim().length > 0;
+  // 图上描边命中 = 搜索框文本与厂商快选 chips 的并集；两者独立开关，互不清除。
+  const hasParetoQuery = paretoQuery.trim().length > 0;
+  const searchActive = hasParetoQuery || paretoVendors.length > 0;
   const searchMatches = useMemo(
     () =>
       searchActive
-        ? chartRows.filter((r) => matchesSearch(r, paretoQuery))
+        ? chartRows.filter(
+            (r) =>
+              (hasParetoQuery && matchesSearch(r, paretoQuery)) ||
+              paretoVendors.includes(r.creator),
+          )
         : [],
-    [chartRows, paretoQuery, searchActive],
+    [chartRows, paretoQuery, paretoVendors, hasParetoQuery, searchActive],
   );
   const highlightIds = useMemo(
     () => (searchActive ? new Set(searchMatches.map((r) => r.id)) : null),
@@ -550,8 +579,9 @@ function App() {
       focus,
       query,
       paretoQuery,
-      // 探索页表格筛选：厂商与「仅看前沿」的激活态必须入链，才能复现同一列表。
-      creator: creator ?? "",
+      // 探索页表格筛选：厂商（多选，| 分隔）与「仅看前沿」的激活态必须入链，才能复现同一列表。
+      creator: creators.join("|"),
+      paretoVendors,
       onlyFront,
       budgetSource,
       budgetLimit,
@@ -560,7 +590,7 @@ function App() {
         ? {
             view: ranking.view,
             rankingQuery: ranking.query,
-            creator: ranking.creator ?? "",
+            creator: ranking.creators.join("|"),
             openness: ranking.openness,
             scoredOnly: ranking.scoredOnly,
             coverageMaskId:
@@ -584,7 +614,8 @@ function App() {
     focus,
     query,
     paretoQuery,
-    creator,
+    paretoVendors,
+    creators,
     onlyFront,
     budgetSource,
     budgetLimit,
@@ -1238,11 +1269,17 @@ function App() {
             <section className="panel mb-[18px] px-[20px] py-[14px] max-760:px-[13px] max-760:py-[13px]">
               <VendorSearchChips
                 chips={exploreChips}
-                query={paretoQuery}
-                onSearch={setParetoQuery}
+                vendors={paretoVendors}
+                onToggle={(value) =>
+                  setParetoVendors((previous) =>
+                    previous.includes(value)
+                      ? previous.filter((v) => v !== value)
+                      : [...previous, value],
+                  )
+                }
               />
               <p className="mt-[7px] mb-0 text-[9px] text-[#8c9ba5]">
-                点选厂商可在帕累托图中标记命中模型；完整点位和下方表格过滤保持独立。
+                点选厂商可在帕累托图中以厂商色标记命中模型，可多选叠加、再次点击反选；与搜索框合并计数，完整点位和下方表格过滤保持独立。
               </p>
             </section>
             <section className="grid grid-cols-[254px_minmax(0,1fr)] gap-[19px] mb-[22px] items-start max-1180:grid-cols-[235px_minmax(0,1fr)] max-1180:gap-[16px] max-760:flex max-760:flex-col max-760:gap-[16px]">
@@ -1257,9 +1294,9 @@ function App() {
                       <p className="search-hint">
                         {searchMatches.length
                           ? plottedMatches
-                            ? `搜索命中 ${searchMatches.length} 个模型，图中 ${plottedMatches} 个点位已用橙色描边标注；全部点位保留。`
-                            : `搜索命中 ${searchMatches.length} 个模型，但它们都缺少图表所需的有效成本；全部点位仍保留。`
-                          : "搜索没有命中当前图表中的模型；全部点位仍保留。"}
+                            ? `搜索与厂商快选共命中 ${searchMatches.length} 个模型，图中 ${plottedMatches} 个点位已按厂商专属色描边标注；全部点位保留。`
+                            : `搜索与厂商快选共命中 ${searchMatches.length} 个模型，但它们都缺少图表所需的有效成本；全部点位仍保留。`
+                          : "搜索与厂商快选没有命中当前图表中的模型；全部点位仍保留。"}
                       </p>
                     )}
                   </div>
@@ -1348,13 +1385,15 @@ function App() {
                   <Select
                     className="w-[190px]"
                     virtual={false}
+                    mode="multiple"
                     allowClear
+                    maxTagCount="responsive"
                     showSearch
                     optionFilterProp="label"
                     placeholder="全部厂商"
                     aria-label="表格厂商筛选"
-                    value={creator}
-                    onChange={setCreator}
+                    value={creators}
+                    onChange={setCreators}
                     options={[...new Set(analysis.rows.map((m) => m.creator))]
                       .sort()
                       .map((value) => ({ value, label: value }))}
@@ -1372,8 +1411,9 @@ function App() {
               </div>
               <CreatorChips
                 chips={exploreChips}
-                creator={creator}
-                onChange={setCreator}
+                creators={creators}
+                multiple
+                onChange={setCreators}
                 className="px-[24px] pb-[14px] max-760:px-[17px]"
               />
               <Table

@@ -118,6 +118,36 @@ test("explore display state (creator, onlyFront) round trips and defaults stay o
   assert.equal(round.state.creator, "Z AI");
   assert.equal(round.state.onlyFront, true);
 });
+test("multi-vendor state: cr pipe joins stay intact, pv chip set round trips", () => {
+  // cr 多选以「|」连接原样透传（拆分由消费端负责），单选旧链接不受影响
+  const multi = decodeShareState(
+    shareHash("explore", { creator: "Z AI|Alibaba" }),
+  ).state;
+  assert.equal(multi.creator, "Z AI|Alibaba");
+  assert.equal(
+    encodeShareState({ creator: "Z AI|Alibaba" }),
+    "cr=Z+AI%7CAlibaba",
+  );
+  // 帕累托厂商快选 chips：数组去重入链，空数组不占参数
+  assert.equal(encodeShareState({ paretoVendors: [] }), "");
+  const pv = decodeShareState(
+    shareHash("explore", { paretoVendors: ["Alibaba", "Kimi", "Alibaba"] }),
+  ).state;
+  assert.deepEqual(pv.paretoVendors, ["Alibaba", "Kimi"]);
+  assert.equal(
+    encodeShareState({ paretoVendors: ["Alibaba", "Kimi"] }),
+    "pv=Alibaba%7CKimi",
+  );
+  // 手编链接：无 pv 即无快选；空段与重复段清洗
+  assert.deepEqual(
+    decodeShareState("#explore?pv=Alibaba%7C%7CKimi").state.paretoVendors,
+    ["Alibaba", "Kimi"],
+  );
+  assert.equal(
+    decodeShareState("#explore?q=glm").state.paretoVendors,
+    undefined,
+  );
+});
 
 test("retired formula and weight parameters no longer select any scoring path", () => {
   assert.deepEqual(

@@ -25,6 +25,7 @@ import {
 import {
   NAMES,
   COSTS,
+  colorFor,
   costFormat,
   money,
   valueFilterPredicate,
@@ -104,9 +105,15 @@ const nameCell = (r, onSelect, id = r.id) => (
 // 泛化点（默认值=排行榜厂商筛选的原行为）：文案前缀 label、title 提示 hint、
 // chip 锚类 chipClass（E2E 页级定位依赖锚类不串场）、空态说明 emptyNote。
 // 只改变显示，不影响分数、名次与前沿成员。
+// 厂商快捷筛选 chips。multiple 模式（厂商筛选）：creators 为已选数组，点击叠加
+// 已选集合、再次点击反选单个厂商；单选模式（性价比卡快筛）：creator 为当前值，
+// 再次点击同一 chip 取消。两种模式共用厂商专属色标记身份：色点常驻，激活态
+// 用同色描边与浅底强调，文字保持深色保证对比度。
 export function CreatorChips({
   chips,
   creator,
+  creators = [],
+  multiple = false,
   onChange,
   className = "",
   label = "厂商快捷筛选",
@@ -115,6 +122,19 @@ export function CreatorChips({
   hint = "完整列表见「全部厂商」下拉",
   emptyNote = "当前视图暂无该厂商配置",
 }) {
+  const isActive = (value) =>
+    multiple ? creators.includes(value) : creator === value;
+  const toggle = (value) => {
+    if (multiple) {
+      onChange(
+        creators.includes(value)
+          ? creators.filter((c) => c !== value)
+          : [...creators, value],
+      );
+    } else {
+      onChange(isActive(value) ? undefined : value);
+    }
+  };
   return (
     <div
       className={
@@ -127,8 +147,9 @@ export function CreatorChips({
         {label}
       </span>
       {chips.map((chip) => {
-        const active = creator === chip.value;
+        const active = isActive(chip.value);
         const empty = chip.count === 0;
+        const color = colorFor(chip.value);
         return (
           <button
             key={chip.value}
@@ -139,20 +160,34 @@ export function CreatorChips({
               `${chipPrefix} ${chip.value}` +
               (chip.note ? ` · ${chip.note}` : "") +
               ` · ${hint}` +
-              (active || !empty ? "；再次点击取消筛选" : `；${emptyNote}`)
+              (active || !empty
+                ? multiple
+                  ? "；再次点击反选该厂商"
+                  : "；再次点击取消筛选"
+                : `；${emptyNote}`)
+            }
+            style={
+              active
+                ? { borderColor: color, backgroundColor: color + "1a" }
+                : undefined
             }
             className={
               chipClass +
               " inline-flex items-center gap-[5px] rounded-full border px-[10px] py-[2px] text-[11px] leading-[1.7] transition-colors " +
               (active
-                ? "border-[#128574] bg-[#eaf5f1] font-medium text-[#0c6e5e]"
+                ? "font-medium text-[#274354]"
                 : "border-[#dce7e3] bg-white text-[#5f7c74] hover:border-[#a8cdc0] hover:text-[#2c6f60]") +
               (empty && !active
                 ? " cursor-not-allowed opacity-40"
                 : " cursor-pointer")
             }
-            onClick={() => onChange(active ? undefined : chip.value)}
+            onClick={() => toggle(chip.value)}
           >
+            <span
+              aria-hidden="true"
+              className="inline-block h-[8px] w-[8px] shrink-0 rounded-full"
+              style={{ background: color }}
+            />
             {chip.label}
             <small className="text-[9px] font-normal tabular-nums opacity-70">
               {chip.count}
@@ -643,7 +678,7 @@ export function Rankings({
   const {
     view,
     query,
-    creator,
+    creators,
     openness,
     scoredOnly,
     coverageMaskId,
@@ -686,7 +721,7 @@ export function Rankings({
     const currentRows = new Map(ranked.map((row) => [row.id, row]));
     return filterModels(coverageRanked, {
       query,
-      creator,
+      creators,
       openness,
       scoredOnly,
     }).map((row) => {
@@ -697,7 +732,7 @@ export function Rankings({
         currentComposite: current?.composite ?? null,
       };
     });
-  }, [ranked, coverageRanked, query, creator, openness, scoredOnly]);
+  }, [ranked, coverageRanked, query, creators, openness, scoredOnly]);
   const native = useMemo(
     () =>
       view === "fusion"
@@ -730,7 +765,7 @@ export function Rankings({
     sourceHealth(sources?.[budget.budgetSource]).excluded;
   const filtered = filterModels(budgeted, {
     query,
-    creator,
+    creators,
     openness,
     scoredOnly: view === "fusion" && scoredOnly,
   });
@@ -1054,7 +1089,7 @@ export function Rankings({
           block
           aria-label="排行榜来源"
           value={view}
-          onChange={(v) => onRanking({ view: v, creator: undefined })}
+          onChange={(v) => onRanking({ view: v, creators: [] })}
           options={[
             { value: "fusion", label: "融合总榜" },
             ...SOURCE_IDS.map((value) => ({ value, label: NAMES[value] })),
@@ -1108,8 +1143,9 @@ export function Rankings({
         <section className="ranking-table rounded-[13px] border border-line bg-surface shadow-card">
           <CreatorChips
             chips={chips}
-            creator={creator}
-            onChange={(value) => onRanking({ creator: value })}
+            creators={creators}
+            multiple
+            onChange={(value) => onRanking({ creators: value })}
             className="px-[21px] pt-[20px] pb-[10px] max-760:px-[15px]"
           />
           <div className="ranking-filters flex flex-wrap items-center gap-[10px] px-[21px] pt-[10px] pb-[12px] max-760:gap-[9px] max-760:px-[15px] max-760:pt-[13px]">
@@ -1136,10 +1172,12 @@ export function Rankings({
             <Select
               virtual={false}
               aria-label="排行榜厂商"
+              mode="multiple"
               allowClear
+              maxTagCount="responsive"
               placeholder="全部厂商"
-              value={creator}
-              onChange={(v) => onRanking({ creator: v })}
+              value={creators}
+              onChange={(v) => onRanking({ creators: v })}
               options={[...new Set(pool.map((r) => r.creator).filter(Boolean))]
                 .sort()
                 .map((value) => ({ value, label: value }))}

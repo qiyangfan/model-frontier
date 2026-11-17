@@ -169,11 +169,12 @@ try {
   const legend = page
     .locator(".chart-legend")
     .getByRole("button", { name: "闭源 / 未确认", exact: true });
+  // 点身颜色已让位给厂商身份色，图例标记是中性空心圆（形状编码开放/闭源）
   assert.equal(
     await legend
       .locator("span")
-      .evaluate((e) => getComputedStyle(e).backgroundColor),
-    "rgb(50, 103, 184)",
+      .evaluate((e) => getComputedStyle(e).borderColor),
+    "rgb(101, 123, 139)",
   );
   assert.equal(await legend.evaluate((e) => getComputedStyle(e).opacity), "1");
   await legend.click();
@@ -185,7 +186,7 @@ try {
   await page.locator(".search-hint").waitFor();
   assert.match(
     await page.locator(".search-hint").innerText(),
-    /搜索命中 \d+ 个模型/,
+    /命中 \d+ 个模型/,
   );
   assert.equal(
     await chartStage.getAttribute("data-chart-points"),
