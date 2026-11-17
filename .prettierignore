@@ -3,4 +3,4 @@ work/
 test-artifacts/
 data/
 package-lock.json
-启动模型前沿.command
+.zcode/
