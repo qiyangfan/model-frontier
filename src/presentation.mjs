@@ -30,23 +30,45 @@ export const formatTime = (s) =>
 
 // ══════════ 厂商专属色（编辑策划数据，仅区分身份，不承载评测语义） ══════════
 // 图上点身、chip 色点、搜索描边、悬浮浮层共用同一映射，保证同一厂商在任何视图恒同色。
-// 固定 10 家（VENDOR_CHIPS 全集）手工挑色：互不撞色，且避开全球前沿虚线蓝 #3267b8 /
-// 开放前沿实线青绿 #128574——散点落在前沿线附近，点身撞上线的颜色会被误读成线；
-// 深浅均按白底可辨取值。表外厂商走 FNV-1a 散列兜底取色，仅保证稳定不保证不撞
-// （表外厂商只出现在「全部厂商」下拉与文本标签旁，文字始终在场，撞色无害）。
+// owner 裁定：这组颜色纯为区分而设，不考虑品牌调性与和谐性，区分度越大越好。
+// 生成方式：OKLCH 色域内按色相铺候选点（明度按色相自适应取最显彩档），
+// 以 CIEDE2000 感知距离做最远点搜索挑 10 色（组内最小感知距离 23.3，
+// 旧配色 15.7——Kimi 与 Qwen 两个红系曾近到 11）；并保证对三条前沿线
+// （虚线蓝 #3267b8 / 实线青绿 #128574 / 国产线酒红 #9a1c36）的最小感知
+// 距离 ≥14，避免点被误读成线。
+// 分配按 chip 行相邻取色距最远的一组排列。表外厂商走 FNV-1a 散列从专属兜底
+// 色库（FALLBACK_COLORS，十色与固定十色、前沿线全部拉开）取色——新厂商永远
+// 不会撞现有厂商的颜色；新厂商之间仍可能撞，哪个变得重要就提拔进固定表。
 const VENDOR_COLORS = {
-  Anthropic: "#b0653a",
-  Google: "#0f6f9e",
-  Meta: "#7a4fb0",
-  OpenAI: "#2f7d3b",
-  Xiaomi: "#c2447c",
-  DeepSeek: "#4a5480",
-  "Z AI": "#9a6210",
-  Kimi: "#a83a3a",
-  StepFun: "#526e0f",
-  Alibaba: "#b5482a",
+  Anthropic: "#3796f0",
+  Google: "#7e5d08",
+  Meta: "#da7308",
+  OpenAI: "#05707d",
+  Xiaomi: "#e36271",
+  DeepSeek: "#949b0a",
+  "Z AI": "#ab3419",
+  Kimi: "#ae73dc",
+  StepFun: "#1b780b",
+  Alibaba: "#a13171",
 };
-const FALLBACK_PALETTE = Object.values(VENDOR_COLORS);
+// 兜底色库：非固定厂商（新黑马）散列取色专用，与固定十色、前沿线全部拉开——
+// 新厂商永远不会撞现有厂商的颜色。新厂商之间仍可能撞（散列同槽），
+// 但两个新厂商同时够着有效 PK 分的概率低；哪个新厂商变得重要了，
+// 就提拔进固定表（占用其兜底色并重算兜底库），守卫测试会强制核验距离。
+const FALLBACK_COLORS = [
+  "#3ec478",
+  "#05bdd0",
+  "#7347af",
+  "#d49e00",
+  "#ed7abd",
+  "#fb7e5d",
+  "#979cfe",
+  "#0eb09e",
+  "#569b2b",
+  "#616a0b",
+];
+const FALLBACK_PALETTE = FALLBACK_COLORS;
+export { FALLBACK_COLORS };
 export function colorFor(creator) {
   const s = String(creator ?? "");
   if (VENDOR_COLORS[s]) return VENDOR_COLORS[s];

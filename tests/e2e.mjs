@@ -55,13 +55,16 @@ try {
   assert.equal(await range.getByText("开放优先", { exact: true }).count(), 0);
   const openSort = page.getByRole("checkbox", { name: "开放优先排序" });
   assert.equal(await openSort.isChecked(), true);
-  assert.equal(
-    await page
-      .locator(".chart-legend")
-      .getByRole("button", { name: "开放权重前沿", exact: true })
-      .count(),
-    0,
-  );
+  // 三条前沿线在全部模型视图常驻可开关（国产前沿不再只属于仅国产视图）
+  for (const name of ["开放权重前沿", "国产前沿", "全球前沿"]) {
+    assert.equal(
+      await page
+        .locator(".chart-legend")
+        .getByRole("button", { name, exact: true })
+        .count(),
+      1,
+    );
+  }
   await openSort.uncheck();
   assert.equal(
     await range
@@ -78,10 +81,26 @@ try {
       .count(),
     1,
   );
+  // 约束视图里全球前沿线不绘制（对其余点算前沿不成立），图例不列
   assert.equal(
     await page
       .locator(".chart-legend")
       .getByRole("button", { name: "全球前沿", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page
+      .locator(".chart-legend")
+      .getByRole("button", { name: "国产前沿", exact: true })
+      .count(),
+    0,
+  );
+  // 仅开放权重视图没有闭源点，闭源图例不应留下空开关
+  assert.equal(
+    await page
+      .locator(".chart-legend")
+      .getByRole("button", { name: "闭源 / 未确认", exact: true })
       .count(),
     0,
   );

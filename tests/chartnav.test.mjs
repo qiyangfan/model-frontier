@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isZoomed, scaledRange, wheelZoomGate } from "../src/chartNav.mjs";
+import {
+  dominationZoneVisible,
+  isZoomed,
+  scaledRange,
+  wheelZoomGate,
+} from "../src/chartNav.mjs";
 
 test("wheelZoomGate：普通滚轮归页面滚动，⌘/Ctrl/合成捏合归图表缩放", () => {
   assert.equal(wheelZoomGate({ ctrlKey: false, metaKey: false }), "scroll");
@@ -40,6 +45,14 @@ test("isZoomed：任一轴偏离全范围即为已缩放", () => {
   );
   // 缺失范围的条目（未初始化）按全范围处理
   assert.equal(isZoomed([{}, { start: 0, end: 100 }]), false);
+});
+
+test("dominationZoneVisible：全部模型视图绘制斩杀区，约束视图不绘制", () => {
+  // 默认 focus 是 openFirst（图表口径等同全部模型），曾因只放行 "all" 而失效
+  assert.equal(dominationZoneVisible("openFirst"), true);
+  assert.equal(dominationZoneVisible("all"), true);
+  assert.equal(dominationZoneVisible("openOnly"), false);
+  assert.equal(dominationZoneVisible("cnOnly"), false);
 });
 
 // 窗口计算带浮点乘法，逐位相等不可靠，用容差断言

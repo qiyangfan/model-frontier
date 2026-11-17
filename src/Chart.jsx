@@ -23,7 +23,12 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { costFormat, money, NAMES, colorFor } from "./presentation.mjs";
-import { isZoomed, scaledRange, wheelZoomGate } from "./chartNav.mjs";
+import {
+  dominationZoneVisible,
+  isZoomed,
+  scaledRange,
+  wheelZoomGate,
+} from "./chartNav.mjs";
 echarts.use([
   ScatterChart,
   LineChart,
@@ -54,7 +59,7 @@ const LEGEND_MARKERS = {
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_dashed_#3267b8]",
   frontier:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#128574]",
-  cn: "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#b0653a]",
+  cn: "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#9a1c36]",
 };
 // 六位 hex 转 rgba：描边阴影等半透明样式统一从这里出，避免散落 8 位 hex
 // （zrender 对 #RRGGBBAA 的支持不一致，rgba() 是全版本可靠写法）。
@@ -217,7 +222,7 @@ export default function Chart({
       yMin,
       // 非「全部模型」范围（仅开放权重/仅国产）都不绘制依附全球前沿的支配区域：
       // 该区域只对全量口径有意义，子集视图下「被支配」会指向筛选外的模型
-      openOnly: focus !== "all",
+      openOnly: !dominationZoneVisible(focus),
     };
     paintedZone.current = null;
     const point = (r) => ({
@@ -229,7 +234,11 @@ export default function Chart({
       value: [Math.log10(r.cost), r.composite],
       row: r,
       label: {
-        show: r.frontier || r.openFrontier || r.cnFrontier,
+        // 命中模型的底层名牌让位给环层的厂商色标注牌（point 定义在前、调用在后，
+        // highlightedIds 初始化完成前不会有任何 point 调用，无时序问题）
+        show:
+          (r.frontier || r.openFrontier || r.cnFrontier) &&
+          !highlightedIds?.has(r.id),
         formatter: r.name,
         position: "top",
         distance: 10,
@@ -264,6 +273,7 @@ export default function Chart({
             ] !== false,
         )
       : [];
+    const highlightedIds = new Set(highlighted.map((r) => r.id));
     // 搜索命中双层渲染：描边环按厂商专属色画出（z=10，不拦截事件，只做视觉强调），
     // 内层再补一个同点位、同形状的实心点（z=11，可点击、可悬浮）——被邻近大点
     // 盖住的命中模型靠这层重新露出，无需去够那条月牙边。
@@ -282,9 +292,9 @@ export default function Chart({
         },
         label: {
           ...base.label,
-          show: !(r.frontier || r.openFrontier || r.cnFrontier),
-          // 前沿模型的名称牌挂在点位正上方（point() 的默认位），命中标注改挂
-          // 右侧错开，避免全局 labelLayout 的 hideOverlap 把两个牌子互相顶掉。
+          // 命中标注牌全量接管（含前沿命中——其底层名牌已让位，见 point()）：
+          // 重叠簇里如果唯一可读的名字是非命中邻居的，高亮归属会被误读
+          show: true,
           position: "right",
           color: "#274354",
           backgroundColor: "#fff",
@@ -517,14 +527,18 @@ export default function Chart({
           ),
           line(
             "开放权重前沿",
-            (r) => focus === "openOnly" && r.openFrontier,
+            // 全部模型视图也常驻（可开关）：点的厂商色名牌已宣示子集前沿身份，
+            // 线不画会让「有标记无线」自相矛盾；约束视图仍是各自子集的权威线
+            (r) => focus !== "cnOnly" && r.openFrontier,
             "#128574",
             false,
           ),
           line(
             "国产前沿",
-            (r) => focus === "cnOnly" && r.cnFrontier,
-            "#b0653a",
+            // 线色避开全部厂商色（旧赭橙与 Meta 橙感知距离仅 12.3，owner 实测
+            // 「颜色纯为区分」后按同一算法重选酒红）
+            (r) => focus !== "openOnly" && r.cnFrontier,
+            "#9a1c36",
             false,
           ),
           {
@@ -557,7 +571,9 @@ export default function Chart({
             itemStyle: {
               color: "transparent",
             },
-            labelLayout: { hideOverlap: true, moveOverlap: "shiftY" },
+            // 命中标注牌是「谁被高亮」的唯一权威标识，永不隐藏；
+            // 与邻居名牌相撞时由 shiftY 垂直挪开，而不是把命中名藏掉
+            labelLayout: { hideOverlap: false, moveOverlap: "shiftY" },
             silent: true,
             z: 10,
             tooltip: { show: false },
@@ -622,13 +638,18 @@ export default function Chart({
     <div ref={container} className="chart-stage" data-chart-points={plotCount}>
       <div className="flex items-center justify-between gap-[12px] pt-[8px] pb-[5px] max-1180:flex-wrap max-1180:gap-[5px] max-760:gap-[8px] max-760:px-[3px] max-760:pt-[9px]">
         <div className="chart-legend">
-          {LEGEND.filter(([, kind]) =>
-            focus === "openOnly"
-              ? kind === "open" || kind === "frontier"
-              : focus === "cnOnly"
-                ? kind !== "global" && kind !== "frontier"
-                : kind !== "frontier" && kind !== "cn",
-          ).map(([name, kind]) => (
+          {LEGEND.filter(([, kind]) => {
+            // 图例只列真正在画的线/点：范围视图（仅开放权重/仅国产）里全球前沿线
+            // 不绘制（对其余点算前沿不成立），子集前沿线在全部模型视图也常驻。
+            // 注意默认 focus 是 openFirst（图表口径等同全部模型），不是字面量 "all"
+            if (kind === "global") {
+              return focus !== "openOnly" && focus !== "cnOnly";
+            }
+            if (kind === "frontier") return focus !== "cnOnly";
+            if (kind === "cn") return focus !== "openOnly";
+            if (kind === "closed") return focus !== "openOnly";
+            return true;
+          }).map(([name, kind]) => (
             <button
               key={name}
               className={

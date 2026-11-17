@@ -22,7 +22,7 @@ LiveBench 分数按现有 ADR 对可用分类取等权均值；当前源站 Over
 
 ## 使用
 
-当前机器上已安装依赖、构建完毕。双击 **启动模型前沿.command**，浏览器打开 <http://localhost:4317>。若已经运行，会复用现有服务。
+当前机器上已安装依赖、构建完毕。在本目录运行 `npm start`，浏览器打开 <http://localhost:4317>。若已经运行，会复用现有服务。
 
 普通终端方式（在本目录）：
 
@@ -52,7 +52,7 @@ Arena 文本总榜取自官方 Hugging Face 数据集 `lmarena-ai/leaderboard-da
 
 Arena 数据取自 Hugging Face，直连不可达的网络环境需经代理抓取：Node 内置 fetch 只认启动那一刻已有的 `http_proxy` / `https_proxy`，启动后再设无效。npm 脚本（`dev` / `start` / `refresh`）已内置代理自动探测，顺序为：环境变量 → 系统代理设置（macOS）→ 本机常见代理端口（Clash 7890、Clash Verge 7897、Shadowsocks 1087、v2rayN 10809、Surge 6152），都没有则直连（Arena 单源失败保留缓存，其余三站不受影响）。代理端口非常见值且系统设置未登记时，可用 `FRONTIER_PROXY_PORTS=端口1,端口2` 在探测列表最前指定。
 
-数据目录可用 `FRONTIER_DATA_DIR` 覆盖，端口可用 `PORT` 覆盖（双击启动器固定 4317）；`FRONTIER_AUTO_REFRESH=0` 关闭自动源站刷新（供离线演示与确定性 E2E）。
+数据目录可用 `FRONTIER_DATA_DIR` 覆盖，端口可用 `PORT` 覆盖（默认 4317）；`FRONTIER_AUTO_REFRESH=0` 关闭自动源站刷新（供离线演示与确定性 E2E）。
 
 `data/snapshot.json` 保存源站原始配置行、成功获取时间、最近尝试时间、错误、发布标签和刷新间隔。单站失败独立回退；少于 5 条的异常响应不替换缓存。手动刷新与自动刷新共享执行锁，同进程内不会重复抓取。
 

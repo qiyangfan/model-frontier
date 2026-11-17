@@ -12,6 +12,11 @@ export const wheelZoomGate = (e) =>
 export const isZoomed = (entries) =>
   (entries ?? []).some((z) => z?.start > 0 || z?.end < 100);
 
+// 斩杀区（全球前沿支配区域）只在全量口径下绘制：约束视图里的「被支配」会指向
+// 筛选外的模型。注意默认 focus 是 openFirst（图表口径等同全部模型），必须放行。
+export const dominationZoneVisible = (focus) =>
+  focus !== "openOnly" && focus !== "cnOnly";
+
 // 以当前窗口中点为中心按 factor 缩放；窗口最小 2、上限 100，出界部分夹取到 [0,100]。
 export const scaledRange = (start, end, factor) => {
   const middle = (start + end) / 2;
