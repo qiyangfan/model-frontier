@@ -55,16 +55,52 @@ try {
   assert.equal(await range.getByText("开放优先", { exact: true }).count(), 0);
   const openSort = page.getByRole("checkbox", { name: "开放优先排序" });
   assert.equal(await openSort.isChecked(), true);
-  // 三条前沿线在全部模型视图常驻可开关（国产前沿不再只属于仅国产视图）
-  for (const name of ["开放权重前沿", "国产前沿", "全球前沿"]) {
-    assert.equal(
-      await page
-        .locator(".chart-legend")
-        .getByRole("button", { name, exact: true })
-        .count(),
-      1,
+  const legendButton = (name) =>
+    page.locator(".chart-legend").getByRole("button", { name, exact: true });
+  const chartVisible = async () =>
+    Number(
+      await page.locator(".chart-stage").getAttribute("data-chart-visible"),
     );
+  // 点类三开关默认全开，单击独立显隐（国产是叠加筛选，不改变开/闭形状）
+  for (const name of ["开放权重", "闭源 / 未确认", "国产"]) {
+    assert.equal(await legendButton(name).count(), 1);
+    assert.equal(await legendButton(name).getAttribute("aria-pressed"), "true");
   }
+  const allVisible = await chartVisible();
+  await legendButton("国产").click();
+  assert.equal(
+    await legendButton("国产").getAttribute("aria-pressed"),
+    "false",
+  );
+  assert.ok((await chartVisible()) < allVisible, "关掉国产后图上点位数应减少");
+  await legendButton("国产").click();
+  assert.equal(await legendButton("国产").getAttribute("aria-pressed"), "true");
+  // 三条前沿线三选一：默认全球前沿，点另一条即互斥切换
+  for (const name of ["开放权重前沿", "国产前沿", "全球前沿"]) {
+    assert.equal(await legendButton(name).count(), 1);
+  }
+  assert.equal(
+    await legendButton("全球前沿").getAttribute("aria-pressed"),
+    "true",
+  );
+  assert.equal(
+    await legendButton("国产前沿").getAttribute("aria-pressed"),
+    "false",
+  );
+  await legendButton("国产前沿").click();
+  assert.equal(
+    await legendButton("国产前沿").getAttribute("aria-pressed"),
+    "true",
+  );
+  assert.equal(
+    await legendButton("全球前沿").getAttribute("aria-pressed"),
+    "false",
+  );
+  await legendButton("全球前沿").click();
+  assert.equal(
+    await legendButton("全球前沿").getAttribute("aria-pressed"),
+    "true",
+  );
   await openSort.uncheck();
   assert.equal(
     await range
@@ -74,38 +110,33 @@ try {
   );
   await range.getByText("仅开放权重", { exact: true }).click();
   assert.equal(await openSort.isDisabled(), true);
+  // 约束视图只列该子集成立的前沿线，且自动处于选中态
+  assert.equal(await legendButton("开放权重前沿").count(), 1);
   assert.equal(
-    await page
-      .locator(".chart-legend")
-      .getByRole("button", { name: "开放权重前沿", exact: true })
-      .count(),
-    1,
+    await legendButton("开放权重前沿").getAttribute("aria-pressed"),
+    "true",
   );
-  // 约束视图里全球前沿线不绘制（对其余点算前沿不成立），图例不列
-  assert.equal(
-    await page
-      .locator(".chart-legend")
-      .getByRole("button", { name: "全球前沿", exact: true })
-      .count(),
-    0,
-  );
-  assert.equal(
-    await page
-      .locator(".chart-legend")
-      .getByRole("button", { name: "国产前沿", exact: true })
-      .count(),
-    0,
-  );
-  // 仅开放权重视图没有闭源点，闭源图例不应留下空开关
-  assert.equal(
-    await page
-      .locator(".chart-legend")
-      .getByRole("button", { name: "闭源 / 未确认", exact: true })
-      .count(),
-    0,
-  );
+  assert.equal(await legendButton("全球前沿").count(), 0);
+  assert.equal(await legendButton("国产前沿").count(), 0);
+  // 仅开放权重视图没有闭源点，闭源图例不应留下空开关；国产筛选仍有效
+  assert.equal(await legendButton("闭源 / 未确认").count(), 0);
+  assert.equal(await legendButton("国产").count(), 1);
   await range.getByText("全部模型", { exact: true }).click();
   assert.equal(await openSort.isEnabled(), true);
+  // 回归：全部模型关掉国产后切到仅国产，国产开关不列但筛选不得继续生效，
+  // 否则图会空无一物且没有控件可恢复
+  await legendButton("国产").click();
+  await range.getByText("仅国产", { exact: true }).click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".chart-legend button")].every(
+      (b) => !b.textContent.includes("全球前沿"),
+    ),
+  );
+  assert.equal(await legendButton("国产").count(), 0);
+  assert.ok((await chartVisible()) > 0, "仅国产视图不应被残留的国产筛选清空");
+  await range.getByText("全部模型", { exact: true }).click();
+  await legendButton("国产").click();
+  assert.equal(await legendButton("国产").getAttribute("aria-pressed"), "true");
   await openSort.check();
   await page
     .getByText("综合相对成本（基准 1 倍）", { exact: true })

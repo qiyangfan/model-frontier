@@ -22,7 +22,13 @@ import {
   MarkAreaComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { costFormat, money, NAMES, colorFor } from "./presentation.mjs";
+import {
+  colorFor,
+  costFormat,
+  isDomesticCreator,
+  money,
+  NAMES,
+} from "./presentation.mjs";
 import {
   dominationZoneVisible,
   isZoomed,
@@ -41,12 +47,18 @@ echarts.use([
   MarkAreaComponent,
   CanvasRenderer,
 ]);
-const LEGEND = [
+// 点类开关：默认全开，单击隐藏该类。开放/闭源按形状编码，国产是叠加筛选
+// （国产模型同时属开源或闭源，关掉国产即隐藏全部国产点，不论权重）。
+const POINT_LEGEND = [
   ["开放权重", "open"],
   ["闭源 / 未确认", "closed"],
+  ["国产", "domestic"],
+];
+// 前沿线三选一：同一时刻只画一条，避免三条交叉线互相压住散点与名牌。
+const LINE_LEGEND = [
   ["全球前沿", "global"],
-  ["开放权重前沿", "frontier"],
-  ["国产前沿", "cn"],
+  ["开放权重前沿", "openFrontier"],
+  ["国产前沿", "cnFrontier"],
 ];
 // 图例标记样式查找表：原 .legend-marker 及 .open/.closed/.global/.frontier 变体内联。
 // 点身颜色已让位给厂商身份色，开放/闭源改由「形状」编码——图例用中性描边的
@@ -55,11 +67,14 @@ const LEGEND_MARKERS = {
   open: "relative inline-block mx-[1px] h-[8px] w-[8px] shrink-0 rotate-45 border-[1.5px] border-[#657b8b]",
   closed:
     "relative inline-block h-[10px] w-[10px] shrink-0 rounded-full border-[1.5px] border-[#657b8b]",
+  domestic:
+    "relative inline-block h-[9px] w-[9px] shrink-0 rounded-full border-[1.5px] border-dashed border-[#9a1c36]",
   global:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_dashed_#3267b8]",
-  frontier:
+  openFrontier:
     "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#128574]",
-  cn: "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#9a1c36]",
+  cnFrontier:
+    "relative inline-block h-0 w-[19px] shrink-0 [border-top:2px_solid_#9a1c36]",
 };
 // 六位 hex 转 rgba：描边阴影等半透明样式统一从这里出，避免散落 8 位 hex
 // （zrender 对 #RRGGBBAA 的支持不一致，rgba() 是全版本可靠写法）。
@@ -70,6 +85,10 @@ const withAlpha = (hex, alpha) => {
 // 点位符号半径：闭源圆点 symbolSize 10、开放权重菱形 symbolSize 13 的一半。
 // 悬浮浮层的「同点位重叠」判定与顶层补点尺寸都以此为基准。
 const symbolRadius = (r) => (r.openWeights === true ? 6.5 : 5);
+// 国产叠加筛选只在全部模型范围生效：仅国产视图下该开关不列，若状态残留还会
+// 让刚切进该范围的图空无一物、且没有控件可恢复。
+const domesticPointsHidden = (visibility, focus) =>
+  visibility["国产"] === false && focus !== "cnOnly";
 
 export default function Chart({
   rows,
@@ -94,8 +113,26 @@ export default function Chart({
   });
   const [expanded, setExpanded] = useState(false),
     [visibility, setVisibility] = useState({}),
-    [zoomed, setZoomed] = useState(false);
+    [zoomed, setZoomed] = useState(false),
+    [line, setLine] = useState("global");
+  // 约束视图只有对应的子集前沿线成立（对其余点算前沿不成立）；全部模型视图三选一
+  const lines =
+    focus === "openOnly"
+      ? ["openFrontier"]
+      : focus === "cnOnly"
+        ? ["cnFrontier"]
+        : ["global", "openFrontier", "cnFrontier"];
+  const activeLine = lines.includes(line) ? line : lines[0];
   const plotCount = rows.filter((r) => r.plottable).length;
+  const hiddenDomestic = domesticPointsHidden(visibility, focus);
+  // 图例筛选后的实际可见点位数（E2E 用它验证开关确实生效，而非只改按钮状态）
+  const visibleCount = rows.filter(
+    (r) =>
+      r.plottable &&
+      visibility[r.openWeights === true ? "开放权重" : "闭源 / 未确认"] !==
+        false &&
+      (!hiddenDomestic || !isDomesticCreator(r.creator)),
+  ).length;
   useEffect(() => {
     const node = element.current;
     const chart = echarts.init(node);
@@ -170,7 +207,7 @@ export default function Chart({
     // 60ms 窗口留给紧随新点的 mousemove 取消。
     chart.on("mousemove", (p) =>
       paintZone(
-        !zoneContext.current?.openOnly && p.data?.row?.frontier
+        !zoneContext.current?.zoneHidden && p.data?.row?.frontier
           ? p.data.row
           : null,
       ),
@@ -220,11 +257,22 @@ export default function Chart({
       plot,
       axisMax,
       yMin,
-      // 非「全部模型」范围（仅开放权重/仅国产）都不绘制依附全球前沿的支配区域：
-      // 该区域只对全量口径有意义，子集视图下「被支配」会指向筛选外的模型
-      openOnly: !dominationZoneVisible(focus),
+      // 支配区域依附全球前沿线：非「全部模型」范围或未选中全球前沿线时不绘制
+      zoneHidden: !dominationZoneVisible(focus) || activeLine !== "global",
     };
     paintedZone.current = null;
+    // 国产是叠加筛选：关掉即隐藏全部国产点（不论权重）；仅国产范围下该开关不列，
+    // 筛选也不应继续生效（见 domesticPointsHidden）
+    const domesticOff = domesticPointsHidden(visibility, focus);
+    const filteredForDomestic = (r) =>
+      !domesticOff || !isDomesticCreator(r.creator);
+    // 名牌只宣示当前所选前沿线的成员，避免「有标记无线」的错觉
+    const frontierShown = (r) =>
+      activeLine === "openFrontier"
+        ? r.openFrontier
+        : activeLine === "cnFrontier"
+          ? r.cnFrontier
+          : r.frontier;
     const point = (r) => ({
       id: r.id,
       name: r.name,
@@ -236,9 +284,7 @@ export default function Chart({
       label: {
         // 命中模型的底层名牌让位给环层的厂商色标注牌（point 定义在前、调用在后，
         // highlightedIds 初始化完成前不会有任何 point 调用，无时序问题）
-        show:
-          (r.frontier || r.openFrontier || r.cnFrontier) &&
-          !highlightedIds?.has(r.id),
+        show: frontierShown(r) && !highlightedIds?.has(r.id),
         formatter: r.name,
         position: "top",
         distance: 10,
@@ -268,6 +314,7 @@ export default function Chart({
       ? plot.filter(
           (r) =>
             highlightIds?.has(r.id) &&
+            filteredForDomestic(r) &&
             visibility[
               r.openWeights === true ? "开放权重" : "闭源 / 未确认"
             ] !== false,
@@ -326,6 +373,7 @@ export default function Chart({
       type: "line",
       data: plot
         .filter(filter)
+        .filter(filteredForDomestic)
         .sort((a, b) => a.cost - b.cost)
         .map((r) => ({ ...point(r), label: { show: false } })),
       symbol: "none",
@@ -379,6 +427,7 @@ export default function Chart({
               .filter(
                 (o) =>
                   o.id !== r.id &&
+                  filteredForDomestic(o) &&
                   visibility[
                     o.openWeights === true ? "开放权重" : "闭源 / 未确认"
                   ] !== false,
@@ -422,7 +471,7 @@ export default function Chart({
         },
         legend: {
           show: false,
-          data: LEGEND.map(([name]) => name),
+          data: POINT_LEGEND.map(([name]) => name),
           selected: visibility,
         },
         xAxis: {
@@ -520,16 +569,14 @@ export default function Chart({
         series: [
           line(
             "全球前沿",
-            (r) => focus !== "openOnly" && focus !== "cnOnly" && r.frontier,
+            (r) => activeLine === "global" && r.frontier,
             "#3267b8",
             true,
             "global-frontier",
           ),
           line(
             "开放权重前沿",
-            // 全部模型视图也常驻（可开关）：点的厂商色名牌已宣示子集前沿身份，
-            // 线不画会让「有标记无线」自相矛盾；约束视图仍是各自子集的权威线
-            (r) => focus !== "cnOnly" && r.openFrontier,
+            (r) => activeLine === "openFrontier" && r.openFrontier,
             "#128574",
             false,
           ),
@@ -537,14 +584,14 @@ export default function Chart({
             "国产前沿",
             // 线色避开全部厂商色（旧赭橙与 Meta 橙感知距离仅 12.3，owner 实测
             // 「颜色纯为区分」后按同一算法重选酒红）
-            (r) => focus !== "openOnly" && r.cnFrontier,
+            (r) => activeLine === "cnFrontier" && r.cnFrontier,
             "#9a1c36",
             false,
           ),
           {
             name: "闭源 / 未确认",
             type: "scatter",
-            data: closed.map(point),
+            data: closed.filter(filteredForDomestic).map(point),
             symbolSize: 10,
             // 点色由每个点的 itemStyle 按厂商给出（见 point()），系列层只管透明度
             itemStyle: { opacity: 1 },
@@ -555,7 +602,7 @@ export default function Chart({
           {
             name: "开放权重",
             type: "scatter",
-            data: open.map(point),
+            data: open.filter(filteredForDomestic).map(point),
             symbol: "diamond",
             symbolSize: 13,
             itemStyle: { opacity: 0.94 },
@@ -594,6 +641,8 @@ export default function Chart({
   }, [
     rows,
     focus,
+    line,
+    activeLine,
     chartRef,
     costSource,
     visibility,
@@ -635,19 +684,18 @@ export default function Chart({
     else await container.current?.requestFullscreen?.();
   };
   return (
-    <div ref={container} className="chart-stage" data-chart-points={plotCount}>
+    <div
+      ref={container}
+      className="chart-stage"
+      data-chart-points={plotCount}
+      data-chart-visible={visibleCount}
+    >
       <div className="flex items-center justify-between gap-[12px] pt-[8px] pb-[5px] max-1180:flex-wrap max-1180:gap-[5px] max-760:gap-[8px] max-760:px-[3px] max-760:pt-[9px]">
-        <div className="chart-legend">
-          {LEGEND.filter(([, kind]) => {
-            // 图例只列真正在画的线/点：范围视图（仅开放权重/仅国产）里全球前沿线
-            // 不绘制（对其余点算前沿不成立），子集前沿线在全部模型视图也常驻。
-            // 注意默认 focus 是 openFirst（图表口径等同全部模型），不是字面量 "all"
-            if (kind === "global") {
-              return focus !== "openOnly" && focus !== "cnOnly";
-            }
-            if (kind === "frontier") return focus !== "cnOnly";
-            if (kind === "cn") return focus !== "openOnly";
+        <div className="chart-legend" role="group" aria-label="图表图例">
+          {POINT_LEGEND.filter(([, kind]) => {
+            // 仅开放权重视图没有闭源点；仅国产视图下「国产」等于全量，开关无意义
             if (kind === "closed") return focus !== "openOnly";
+            if (kind === "domestic") return focus !== "cnOnly";
             return true;
           }).map(([name, kind]) => (
             <button
@@ -665,6 +713,29 @@ export default function Chart({
               {name}
             </button>
           ))}
+          <span
+            className="h-[14px] w-px shrink-0 bg-[#e3e9ee] max-760:hidden"
+            aria-hidden="true"
+          />
+          {/* 前沿线三选一：只列当前范围下成立的线，同一时刻只画一条 */}
+          {LINE_LEGEND.filter(([, kind]) => lines.includes(kind)).map(
+            ([name, kind]) => (
+              <button
+                key={name}
+                className={
+                  "flex items-center gap-[7px] border-0 bg-transparent px-0 py-[4px] cursor-pointer text-[10px] whitespace-nowrap max-760:text-[9px] " +
+                  (activeLine === kind
+                    ? "text-[#274354] font-medium"
+                    : "text-[#6c8291]")
+                }
+                aria-pressed={activeLine === kind}
+                onClick={() => setLine(kind)}
+              >
+                <span className={LEGEND_MARKERS[kind]} aria-hidden="true" />
+                {name}
+              </button>
+            ),
+          )}
         </div>
         <div className="chart-actions">
           <Tooltip title="放大">

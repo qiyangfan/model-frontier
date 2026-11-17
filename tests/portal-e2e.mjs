@@ -467,9 +467,8 @@ try {
     .locator('.models-panel .creator-chip[aria-pressed="true"]')
     .click();
   await page.waitForFunction(() => !location.hash.includes("cr="));
-  // 模型范围三值：范围决定「谁在视图里」（图+表）与哪条子集前沿线是权威；
-  // 三条前沿线在全部模型视图常驻可开关（国产前沿线不再只属于仅国产视图）。
-  // 仅国产：全球前沿线退出（对其余点算前沿不成立），国产前沿保留。
+  // 模型范围三值决定「谁在视图里」与哪条前沿线成立；全部模型视图下三条线三选一。
+  // 仅国产：全球前沿线退出（对其余点算前沿不成立），国产前沿自动选中。
   await page
     .getByLabel("模型范围")
     .getByText("仅国产", { exact: true })
@@ -479,20 +478,24 @@ try {
       (b) => !b.textContent.includes("全球前沿"),
     ),
   );
-  await page.locator(".chart-legend").getByText("国产前沿").waitFor();
+  const legendLine = (name) => page.locator(".chart-legend").getByText(name);
+  const cnLegend = legendLine("国产前沿");
+  await cnLegend.waitFor();
+  assert.equal(await cnLegend.getAttribute("aria-pressed"), "true");
   await page
     .getByLabel("模型范围")
     .getByText("全部模型", { exact: true })
     .click();
-  // 切回全部模型：全球前沿回归，国产前沿仍常驻（图例开关可隐藏）
-  await page.locator(".chart-legend").getByText("全球前沿").waitFor();
-  const cnLegend = page.locator(".chart-legend").getByText("国产前沿");
-  await cnLegend.waitFor();
-  assert.equal(await cnLegend.getAttribute("aria-pressed"), "true");
-  await cnLegend.click();
+  // 切回全部模型：全球前沿回归并保持选中；点国产前沿即互斥切换
+  const globalLegend = legendLine("全球前沿");
+  await globalLegend.waitFor();
+  assert.equal(await globalLegend.getAttribute("aria-pressed"), "true");
   assert.equal(await cnLegend.getAttribute("aria-pressed"), "false");
   await cnLegend.click();
   assert.equal(await cnLegend.getAttribute("aria-pressed"), "true");
+  assert.equal(await globalLegend.getAttribute("aria-pressed"), "false");
+  await globalLegend.click();
+  assert.equal(await globalLegend.getAttribute("aria-pressed"), "true");
   await tab("融合排行榜");
   // 能力维度、口径差异、预算筛选与分享链接
   await page
