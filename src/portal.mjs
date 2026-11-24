@@ -22,17 +22,20 @@ export function compareNullableScores(valueOf) {
 export function rankedModels(rows) {
   return rankBy(rows, (r) => r.composite);
 }
+// 搜索按紧凑形式比对（忽略空白、连字符与下划线差异）：用户打「gpt 6.2」或「gpt6.2」
+// 也能命中源站写法「GPT-6.2」。仅影响显示筛选，不改变分数、名次与前沿成员。
+const searchKey = (value) => value.toLowerCase().replace(/[\s\-_]+/g, "");
 export function filterModels(
   rows,
   { query = "", creators = [], openness = "all", scoredOnly = false } = {},
 ) {
-  const needle = query.trim().toLowerCase();
+  const needle = searchKey(query);
   return rows.filter(
     (r) =>
       (!needle ||
-        `${r.name} ${r.configuration ?? ""} ${r.creator}`
-          .toLowerCase()
-          .includes(needle)) &&
+        searchKey(`${r.name} ${r.configuration ?? ""} ${r.creator}`).includes(
+          needle,
+        )) &&
       (creators.length === 0 || creators.includes(r.creator)) &&
       (openness === "all" ||
         (openness === "open" && r.openWeights === true) ||

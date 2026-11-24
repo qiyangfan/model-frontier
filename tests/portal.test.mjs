@@ -145,6 +145,19 @@ test("display filters preserve original rank and scores", () => {
   assert.equal(filterModels(rows, { creators: [] }).length, 3);
   assert.equal(rows[1].rank, 2);
 });
+test("search treats spaces, hyphens and underscores as the same separator", () => {
+  const rows = [
+    { id: "g1", name: "GPT-6.2 Astra (Max)", creator: "OpenAI" },
+    { id: "g2", name: "GPT-6.1 Sol (Max)", creator: "OpenAI" },
+    { id: "q", name: "Qwen3.8-Max", creator: "Alibaba" },
+  ];
+  for (const query of ["GPT-6.2", "gpt 6.2", "gpt6.2", " gpt_6.2 "])
+    assert.deepEqual(
+      filterModels(rows, { query }).map((r) => r.id),
+      ["g1"],
+    );
+  assert.equal(filterModels(rows, { query: "qwen 3.8" }).length, 1);
+});
 test("single source ranking keeps full configurations and no cost requirement; estimates and history opt in", () => {
   const models = [
     model(
