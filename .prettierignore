@@ -4,3 +4,4 @@ test-artifacts/
 data/
 package-lock.json
 .zcode/
+.qoder/
