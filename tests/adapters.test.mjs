@@ -383,6 +383,18 @@ test("LiveBench correctly distinguishes cost per task from successful-task cost"
   assert.equal(r.openWeights, true);
   assert.equal(r.name, "New 99");
 });
+test("LiveBench configuration label keeps the model name without repeating the effort suffix", () => {
+  const js =
+    'const meta={"new-99":{organization:"New",displayName:"New 99 (xhigh)",effort:"xhigh"}}';
+  const r = parseLivebench("model,coding\nnew-99,50\n", "", js).rows[0];
+  assert.equal(r.name, "New 99 (xhigh)");
+  assert.equal(r.configuration, "New 99 (xhigh)");
+  // 无空格写法（"Name(xhigh)"）同样视为已含档位后缀
+  const js2 =
+    'const meta={"new-98":{organization:"New",displayName:"New 98(xhigh)",effort:"xhigh"}}';
+  const r2 = parseLivebench("model,coding\nnew-98,50\n", "", js2).rows[0];
+  assert.equal(r2.configuration, "New 98(xhigh)");
+});
 // LiveBench 摄取编排：v1 发布文件在 /v1/table_<日期>.csv，v2 在
 // /data/<紧凑日期>/table.csv；站点对未命中路径可能返回 SPA 壳（HTTP 200 + HTML），
 // 表头校验是唯一拦网。布局与双形态 id 的来历见 docs/adr/0008。
@@ -445,7 +457,7 @@ test("LiveBench ingestion picks the newest release across v1/v2 id forms and lay
     const r = await FETCHERS.livebench();
     assert.equal(r.rows.length, 1);
     assert.equal(r.rows[0].name, "New 99");
-    assert.equal(r.rows[0].configuration, "max");
+    assert.equal(r.rows[0].configuration, "New 99 (max)");
     assert.equal(r.sourceDate, "2026-10-14");
     assert.equal(r.releaseKey, "20261014");
     assert.equal(seen[0], "/");
@@ -468,7 +480,7 @@ test("LiveBench ingestion falls back from v2 layout to v1 layout for older relea
     assert.equal(r.sourceDate, "2026-06-25");
     assert.equal(r.releaseKey, "2026-06-25");
     assert.equal(r.rows[0].name, "Old 99");
-    assert.equal(r.rows[0].configuration, "low");
+    assert.equal(r.rows[0].configuration, "Old 99 (low)");
     assert.ok(
       seen.indexOf("/data/20261014/table.csv") <
         seen.indexOf("/v1/table_2026_06_25.csv"),
@@ -487,7 +499,7 @@ test("LiveBench v1 leaves unsupported nested variant metadata unknown", async ()
   try {
     const row = (await FETCHERS.livebench()).rows[0];
     assert.equal(row.name, "new-99-variant");
-    assert.equal(row.configuration, "未确认");
+    assert.equal(row.configuration, "new-99-variant");
     assert.equal(row.openWeights, null);
   } finally {
     restore();

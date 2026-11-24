@@ -474,6 +474,11 @@ export function parseLivebench(csv, costCsv, js) {
   const metadata = typeof js === "string" ? lbMetadata(js) : js;
   const rows = input.map((r) => {
     const meta = metadata[r.model] ?? {};
+    const name = meta.name ?? r.model;
+    // LiveBench 把档位单独放在 effort 字段，而单榜「模型配置」列、对比页与 CSV 只读
+    // configuration；必须把模型名并进配置标签，否则整列只剩 xhigh/max/high。
+    // 部分 displayName 自带档位后缀（如 "Claude Fable 5.2 (xhigh)"），不重复追加。
+    const effort = meta.configuration;
     const suites = Object.fromEntries(
       Object.entries(r)
         .filter(
@@ -502,7 +507,7 @@ export function parseLivebench(csv, costCsv, js) {
       }
     const costTask = sumTasks > 0 ? sumCost / sumTasks : null;
     return {
-      name: meta.name ?? r.model,
+      name,
       score,
       costTask,
       costSuccess:
@@ -512,7 +517,10 @@ export function parseLivebench(csv, costCsv, js) {
       suites,
       creator: meta.creator,
       openWeights: meta.openWeights ?? null,
-      configuration: meta.configuration ?? "未确认",
+      configuration:
+        effort && !name.toLowerCase().endsWith(`(${effort.toLowerCase()})`)
+          ? `${name} (${effort})`
+          : name,
       url: SOURCE_INFO.livebench.url,
       rawId: r.model,
     };
