@@ -4,7 +4,6 @@ import {
   Button,
   Checkbox,
   Empty,
-  Input,
   Progress,
   Select,
   Segmented,
@@ -17,7 +16,6 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   ExportOutlined,
-  SearchOutlined,
   SwapOutlined,
   TrophyOutlined,
   UnlockOutlined,
@@ -49,10 +47,13 @@ import {
   applyBudget,
   budgetSummary,
   livebenchSuiteKeys,
+  searchOptions,
+  searchTermsOf,
   vendorChipCounts,
   SOURCE_IDS,
 } from "./portal.mjs";
 import CompareChart from "./CompareChart.jsx";
+import SearchChipInput from "./SearchChipInput.jsx";
 import { majorityMatch } from "./analysis.mjs";
 import {
   ArenaEvidence,
@@ -685,7 +686,7 @@ export function Rankings({
 }) {
   const {
     view,
-    query,
+    search,
     creators,
     openness,
     scoredOnly,
@@ -694,6 +695,7 @@ export function Rankings({
     nativeHistorical,
     showSuites,
   } = ranking;
+  const searchTerms = useMemo(() => searchTermsOf(search), [search]);
   const ranked = useMemo(() => rankedModels(analysis.rows), [analysis.rows]);
   // 证据深度：融合榜两两证据有多厚。纯展示衍生，随“允许估算”等质量开关实时变化，不参与任何评分。
   const depth = useMemo(
@@ -728,7 +730,7 @@ export function Rankings({
   const coverageDiagnosticRows = useMemo(() => {
     const currentRows = new Map(ranked.map((row) => [row.id, row]));
     return filterModels(coverageRanked, {
-      query,
+      query: searchTerms,
       creators,
       openness,
       scoredOnly,
@@ -740,7 +742,7 @@ export function Rankings({
         currentComposite: current?.composite ?? null,
       };
     });
-  }, [ranked, coverageRanked, query, creators, openness, scoredOnly]);
+  }, [ranked, coverageRanked, searchTerms, creators, openness, scoredOnly]);
   const native = useMemo(
     () =>
       view === "fusion"
@@ -752,6 +754,7 @@ export function Rankings({
     [models, view, nativeEstimates, nativeHistorical],
   );
   const pool = view === "fusion" ? ranked : native;
+  const rankingSearchOptions = useMemo(() => searchOptions(pool), [pool]);
   // chip 计数与厂商下拉同口径：当前视图完整行池，不被搜索 / 开放状态提前裁剪。
   const chips = useMemo(() => vendorChipCounts(pool), [pool]);
   // 预算筛选只作用于融合总榜：单榜视图保留源站全部配置作原始证据，不参与预算截断。
@@ -772,7 +775,7 @@ export function Rankings({
     budget.budgetSource !== "none" &&
     sourceHealth(sources?.[budget.budgetSource]).excluded;
   const filtered = filterModels(budgeted, {
-    query,
+    query: searchTerms,
     creators,
     openness,
     scoredOnly: view === "fusion" && scoredOnly,
@@ -1160,13 +1163,12 @@ export function Rankings({
             className="px-[21px] pt-[20px] pb-[10px] max-760:px-[15px]"
           />
           <div className="ranking-filters flex flex-wrap items-center gap-[10px] px-[21px] pt-[10px] pb-[12px] max-760:gap-[9px] max-760:px-[15px] max-760:pt-[13px]">
-            <Input
-              aria-label="排行榜搜索"
-              prefix={<SearchOutlined aria-hidden="true" />}
-              value={query}
-              onChange={(e) => onRanking({ query: e.target.value })}
-              placeholder="搜索模型、配置或厂商"
-              allowClear
+            <SearchChipInput
+              ariaLabel="排行榜搜索"
+              value={search}
+              onChange={(next) => onRanking({ search: next })}
+              options={rankingSearchOptions}
+              placeholder="搜索模型、配置或厂商（回车或点选可多选）"
             />
             <Select
               virtual={false}

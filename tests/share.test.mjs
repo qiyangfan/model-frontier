@@ -181,3 +181,13 @@ test("Arena single-board views are shareable while Arena cost and budget are rej
   assert.deepEqual(decodeShareState("#rankings?cs=arena").state, {});
   assert.deepEqual(decodeShareState("#rankings?bs=arena&bl=2").state, {});
 });
+
+test("multi-term search queries round trip with pipe delimiter", () => {
+  const state = {
+    query: "Claude|DeepSeek",
+    paretoQuery: "GPT-6.2|MiMo",
+    rankingQuery: "Qwen|Kimi",
+  };
+  const round = decodeShareState(shareHash("explore", state));
+  assert.deepEqual(round.state, state);
+});

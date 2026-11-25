@@ -214,18 +214,73 @@ try {
   await page
     .getByRole("checkbox", { name: "包含估算配置", exact: true })
     .check();
-  await page
-    .getByRole("textbox", { name: "排行榜搜索", exact: true })
-    .fill("DeepSeek");
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll(".ranking-table tr[data-row-key]")].every(
-      (r) => r.textContent.toLowerCase().includes("deepseek"),
-    ),
+  // 从当前排行榜行动态提取两个不同厂商名，验证实时预览、多选 chip OR 并集与一键清空
+  const [firstTerm, secondTerm] = await page.evaluate(() => {
+    const creators = [
+      ...new Set(
+        [...document.querySelectorAll(".ranking-table tr[data-row-key]")]
+          .map((r) => r.querySelector("td small")?.textContent?.trim())
+          .filter(Boolean),
+      ),
+    ];
+    return creators.slice(0, 2);
+  });
+  assert.ok(firstTerm && secondTerm, "排行榜需至少有两个不同厂商供多选验证");
+  const rankingSearch = page.getByRole("combobox", {
+    name: "排行榜搜索",
+    exact: true,
+  });
+  await rankingSearch.fill(firstTerm);
+  await page.waitForFunction(
+    (term) =>
+      [...document.querySelectorAll(".ranking-table tr[data-row-key]")].every(
+        (r) => r.textContent.toLowerCase().includes(term.toLowerCase()),
+      ),
+    firstTerm,
   );
   assert.ok(
     (await page.locator(".ranking-table tr[data-row-key]").count()) > 0,
   );
-  await page.getByRole("textbox", { name: "排行榜搜索", exact: true }).fill("");
+  await rankingSearch.press("Enter");
+  await page
+    .locator(".ranking-filters .ant-select-selection-item", {
+      hasText: firstTerm,
+    })
+    .waitFor();
+  await rankingSearch.fill(secondTerm);
+  await rankingSearch.press("Enter");
+  await page
+    .locator(".ranking-filters .ant-select-selection-item", {
+      hasText: secondTerm,
+    })
+    .waitFor();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    ([a, b]) => {
+      const rows = [
+        ...document.querySelectorAll(".ranking-table tr[data-row-key]"),
+      ];
+      return (
+        rows.length > 0 &&
+        rows.every((r) => {
+          const text = r.textContent.toLowerCase();
+          return (
+            text.includes(a.toLowerCase()) || text.includes(b.toLowerCase())
+          );
+        })
+      );
+    },
+    [firstTerm, secondTerm],
+  );
+  await page
+    .locator(".ranking-filters .search-chip-select .ant-select-clear")
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll(
+        ".ranking-filters .search-chip-select .ant-select-selection-item",
+      ).length === 0,
+  );
   await source("Vals");
   await page
     .getByText(
@@ -433,8 +488,14 @@ try {
     return params.get("cr") === "Kimi" && params.get("pv") === "DeepSeek";
   });
   assert.equal(
-    await page.getByRole("textbox", { name: "帕累托搜索" }).inputValue(),
+    await page.getByRole("combobox", { name: "帕累托搜索" }).inputValue(),
     "",
+  );
+  assert.equal(
+    await page
+      .locator(".chart-heading .search-chip-select .ant-select-selection-item")
+      .count(),
+    0,
   );
   assert.match(await page.locator(".search-hint").innerText(), /全部点位保留/);
   // 叠加 Anthropic 成双值，反选 DeepSeek 后只剩 Anthropic
@@ -467,6 +528,45 @@ try {
     .locator('.models-panel .creator-chip[aria-pressed="true"]')
     .click();
   await page.waitForFunction(() => !location.hash.includes("cr="));
+  // 探索页「过滤模型表格」多选 chip（从当前表头两行取厂商验证 OR 并集与 URL q 参数）
+  const [tableTermA, tableTermB] = await page.evaluate(() => [
+    ...new Set(
+      [...document.querySelectorAll(".models-panel tr[data-row-key]")]
+        .map((r) => r.querySelector("td small")?.textContent?.trim())
+        .filter(Boolean),
+    ),
+  ]);
+  assert.ok(tableTermA && tableTermB);
+  const tableSearch = page.getByRole("combobox", {
+    name: "过滤模型表格",
+    exact: true,
+  });
+  await tableSearch.fill(tableTermA);
+  await tableSearch.press("Enter");
+  await tableSearch.fill(tableTermB);
+  await tableSearch.press("Enter");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    ([a, b]) => {
+      const rows = [
+        ...document.querySelectorAll(".models-panel tr[data-row-key]"),
+      ];
+      return (
+        rows.length > 0 &&
+        rows.every((r) => {
+          const text = r.textContent.toLowerCase();
+          return (
+            text.includes(a.toLowerCase()) || text.includes(b.toLowerCase())
+          );
+        })
+      );
+    },
+    [tableTermA, tableTermB],
+  );
+  await page
+    .locator(".models-panel .search-chip-select .ant-select-clear")
+    .click();
+  await page.waitForFunction(() => !location.hash.includes("q="));
   // 模型范围三值决定「谁在视图里」与哪条前沿线成立；全部模型视图下三条线三选一。
   // 仅国产：全球前沿线退出（对其余点算前沿不成立），国产前沿自动选中。
   await page

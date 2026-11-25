@@ -42,6 +42,9 @@ try {
   await history
     .getByRole("combobox", { name: "历史快照", exact: true })
     .waitFor();
+  await history
+    .getByRole("combobox", { name: "搜索历史配置", exact: true })
+    .waitFor();
   await history.getByText(/当前保留/).waitFor();
   await history.getByText(/起始快照只建立基准|新增 \/ 移除指源表/).waitFor();
   await page.screenshot({ path: "test-artifacts/history.png", fullPage: true });

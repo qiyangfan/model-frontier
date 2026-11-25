@@ -158,6 +158,49 @@ test("search treats spaces, hyphens and underscores as the same separator", () =
       ["g1"],
     );
   assert.equal(filterModels(rows, { query: "qwen 3.8" }).length, 1);
+  // 多词 chip 检索：数组或 '|' 串按任一命中（OR）匹配，且支持草稿实时并入与候选项生成
+  assert.deepEqual(
+    filterModels(rows, { query: ["gpt 6.2", "qwen 3.8"] }).map((r) => r.id),
+    ["g1", "q"],
+  );
+  assert.deepEqual(
+    filterModels(rows, { query: "gpt 6.2|qwen 3.8" }).map((r) => r.id),
+    ["g1", "q"],
+  );
+});
+test("multi-chip search helpers split, encode, match, and build deduplicated options", async () => {
+  const {
+    emptySearch,
+    searchTermsOf,
+    encodeSearchTerms,
+    matchesSearchText,
+    searchOptions,
+  } = await import("../src/portal.mjs");
+  const s = emptySearch(" GPT-6.2 | | GPT-6.2 | qwen ");
+  assert.deepEqual(s, { terms: ["GPT-6.2", "qwen"], draft: "" });
+  assert.deepEqual(searchTermsOf({ terms: ["GPT-6.2"], draft: "qwen" }), [
+    "GPT-6.2",
+    "qwen",
+  ]);
+  assert.equal(
+    encodeSearchTerms({ terms: ["GPT-6.2"], draft: "qwen" }),
+    "GPT-6.2|qwen",
+  );
+  assert.equal(matchesSearchText("GPT-6.2 Astra", "-"), true);
+  assert.equal(matchesSearchText("Qwen3.8-Max", ["gpt6.2", "qwen 3.8"]), true);
+  assert.equal(matchesSearchText("Claude", ["gpt6.2", "qwen 3.8"]), false);
+  const opts = searchOptions([
+    { name: "Model A", configuration: "Model A (High)", creator: "Zeta" },
+    { name: "Model A", configuration: "Model A (High)", creator: "Zeta" },
+    { name: "Alpha", creator: "Alpha" },
+  ]);
+  assert.deepEqual(
+    opts.map((o) => o.value),
+    ["Model A (High)", "Alpha", "Zeta"],
+  );
+  assert.equal(opts[0].label, "Model A (High) · Zeta");
+  assert.equal(opts[1].label, "Alpha");
+  assert.equal(opts[2].label, "厂商 · Zeta");
 });
 test("single source ranking keeps full configurations and no cost requirement; estimates and history opt in", () => {
   const models = [

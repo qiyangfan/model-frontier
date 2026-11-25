@@ -8,7 +8,6 @@ import {
   ConfigProvider,
   Drawer,
   Empty,
-  Input,
   InputNumber,
   Select,
   Segmented,
@@ -24,7 +23,6 @@ import {
   DownloadOutlined,
   InfoCircleOutlined,
   ReloadOutlined,
-  SearchOutlined,
   SettingOutlined,
   AppstoreOutlined,
   UnlockOutlined,
@@ -56,9 +54,15 @@ import { Overview, Rankings, Comparison, CreatorChips } from "./Portal.jsx";
 import {
   applyBudget,
   compareNullableScores,
+  emptySearch,
+  encodeSearchTerms,
+  matchesSearchText,
   sanitizeSelection,
+  searchOptions,
+  searchTermsOf,
   vendorChipCounts,
 } from "./portal.mjs";
+import SearchChipInput from "./SearchChipInput.jsx";
 import { applyEvidencePolicy, sourceHealth } from "./evidence.mjs";
 import {
   ArenaEvidence,
@@ -83,10 +87,6 @@ const stored = (key = "frontier:preferences") => {
   } catch {
     return {};
   }
-};
-const matchesSearch = (row, query) => {
-  const needle = query.trim().toLowerCase();
-  return !needle || `${row.name} ${row.creator}`.toLowerCase().includes(needle);
 };
 // cr 链接参数的厂商集合编码：单选旧链接是无分隔符的单值，多选以「|」连接，
 // 两种编码共用同一拆分入口，保证旧分享链接继续可用。
@@ -203,8 +203,10 @@ function App() {
           : "composite"),
     ),
     [focus, setFocus] = useState(shared.focus ?? prefs.focus ?? "openFirst"),
-    [query, setQuery] = useState(shared.query ?? ""),
-    [paretoQuery, setParetoQuery] = useState(shared.paretoQuery ?? ""),
+    [tableSearch, setTableSearch] = useState(() => emptySearch(shared.query)),
+    [paretoSearch, setParetoSearch] = useState(() =>
+      emptySearch(shared.paretoQuery),
+    ),
     [creators, setCreators] = useState(() => splitCreators(shared.creator)),
     [paretoVendors, setParetoVendors] = useState(
       () => shared.paretoVendors ?? [],
@@ -226,7 +228,7 @@ function App() {
     ),
     [ranking, setRanking] = useState(() => ({
       view: shared.view ?? "fusion",
-      query: shared.rankingQuery ?? "",
+      search: emptySearch(shared.rankingQuery),
       creators: splitCreators(shared.creator),
       openness: shared.openness ?? "all",
       scoredOnly: shared.scoredOnly === true,
@@ -277,8 +279,8 @@ function App() {
       setExcludeStale(state.excludeStale === true);
       setCostSource(state.costSource ?? "composite");
       setFocus(state.focus ?? "openFirst");
-      setQuery(state.query ?? "");
-      setParetoQuery(state.paretoQuery ?? "");
+      setTableSearch(emptySearch(state.query));
+      setParetoSearch(emptySearch(state.paretoQuery));
       setParetoVendors(state.paretoVendors ?? []);
       setCreators(splitCreators(state.creator));
       setOnlyFront(state.onlyFront === true);
@@ -289,7 +291,7 @@ function App() {
       // 排行榜筛选是入链口径：缺省即恢复默认视图，与 reload 一致；不入链的单榜开关保留现值。
       setRanking((previous) => ({
         view: state.view ?? "fusion",
-        query: state.rankingQuery ?? "",
+        search: emptySearch(state.rankingQuery),
         creators: splitCreators(state.creator),
         openness: state.openness ?? "all",
         scoredOnly: state.scoredOnly === true,
@@ -494,30 +496,48 @@ function App() {
         ),
     [analysis, focus, budgetSource, budgetLimit, cnFrontierIds],
   );
+  const tableSearchTerms = useMemo(
+    () => searchTermsOf(tableSearch),
+    [tableSearch],
+  );
+  const paretoSearchTerms = useMemo(
+    () => searchTermsOf(paretoSearch),
+    [paretoSearch],
+  );
+  const exploreSearchOptions = useMemo(
+    () => searchOptions(chartRows),
+    [chartRows],
+  );
   // 表格过滤独立于帕累托图搜索；厂商、文本和前沿条件都只收窄表格行。
   const rows = useMemo(
     () =>
       chartRows.filter(
         (r) =>
-          matchesSearch(r, query) &&
+          matchesSearchText(`${r.name} ${r.creator}`, tableSearchTerms) &&
           (creators.length === 0 || creators.includes(r.creator)) &&
           (!onlyFront || r.frontier || r.openFrontier || r.cnFrontier),
       ),
-    [chartRows, query, creators, onlyFront],
+    [chartRows, tableSearchTerms, creators, onlyFront],
   );
-  // 图上描边命中 = 搜索框文本与厂商快选 chips 的并集；两者独立开关，互不清除。
-  const hasParetoQuery = paretoQuery.trim().length > 0;
+  // 图上描边命中 = 搜索框词条（含实时草稿）与厂商快选 chips 的并集；两者独立开关，互不清除。
+  const hasParetoQuery = paretoSearchTerms.some(
+    (term) => term.replace(/[\s\-_]+/g, "").length > 0,
+  );
   const searchActive = hasParetoQuery || paretoVendors.length > 0;
   const searchMatches = useMemo(
     () =>
       searchActive
         ? chartRows.filter(
             (r) =>
-              (hasParetoQuery && matchesSearch(r, paretoQuery)) ||
+              (hasParetoQuery &&
+                matchesSearchText(
+                  `${r.name} ${r.creator}`,
+                  paretoSearchTerms,
+                )) ||
               paretoVendors.includes(r.creator),
           )
         : [],
-    [chartRows, paretoQuery, paretoVendors, hasParetoQuery, searchActive],
+    [chartRows, paretoSearchTerms, paretoVendors, hasParetoQuery, searchActive],
   );
   const highlightIds = useMemo(
     () => (searchActive ? new Set(searchMatches.map((r) => r.id)) : null),
@@ -577,8 +597,8 @@ function App() {
       excludeStale,
       costSource,
       focus,
-      query,
-      paretoQuery,
+      query: encodeSearchTerms(tableSearch),
+      paretoQuery: encodeSearchTerms(paretoSearch),
       // 探索页表格筛选：厂商（多选，| 分隔）与「仅看前沿」的激活态必须入链，才能复现同一列表。
       creator: creators.join("|"),
       paretoVendors,
@@ -589,7 +609,7 @@ function App() {
       ...(tab === "rankings"
         ? {
             view: ranking.view,
-            rankingQuery: ranking.query,
+            rankingQuery: encodeSearchTerms(ranking.search),
             creator: ranking.creators.join("|"),
             openness: ranking.openness,
             scoredOnly: ranking.scoredOnly,
@@ -612,8 +632,8 @@ function App() {
     excludeStale,
     costSource,
     focus,
-    query,
-    paretoQuery,
+    tableSearch,
+    paretoSearch,
     paretoVendors,
     creators,
     onlyFront,
@@ -811,9 +831,9 @@ function App() {
     },
     {
       title: "榜单覆盖",
-      width: 140,
+      width: 195,
       render: (_, r) => (
-        <div className="flex gap-[4px]">
+        <div className="flex flex-wrap gap-[4px]">
           {Object.keys(NAMES).map((s) => (
             <Tooltip
               key={s}
@@ -821,13 +841,17 @@ function App() {
             >
               <span
                 className={
-                  "py-[3px] px-[5px] text-[8px] font-medium rounded-[4px] border " +
+                  "py-[3px] px-[5px] text-[8px] font-medium rounded-[4px] border whitespace-nowrap " +
                   (Number.isFinite(r.representatives[s]?.score)
                     ? "bg-[#edf6f1] text-[#66927f] border-[#dfebe4]"
                     : "bg-[#f9fafb] text-[#c1cbd2] border-[#edf1f3]")
                 }
               >
-                {s === "livebench" ? "LB" : s.toUpperCase()}
+                {s === "livebench"
+                  ? "LB"
+                  : s === "modeldial"
+                    ? "MD"
+                    : s.toUpperCase()}
               </span>
             </Tooltip>
           ))}
@@ -1303,14 +1327,13 @@ function App() {
                     )}
                   </div>
                   <div className="flex items-center gap-[10px] max-760:w-full max-760:flex-col max-760:items-start">
-                    <Input
-                      className="w-[220px] max-760:w-full"
-                      aria-label="帕累托搜索"
-                      prefix={<SearchOutlined aria-hidden="true" />}
-                      placeholder="搜索模型或厂商"
-                      value={paretoQuery}
-                      onChange={(e) => setParetoQuery(e.target.value)}
-                      allowClear
+                    <SearchChipInput
+                      className="w-[280px] max-760:w-full"
+                      ariaLabel="帕累托搜索"
+                      placeholder="搜索模型或厂商（回车或点选可多选）"
+                      value={paretoSearch}
+                      onChange={setParetoSearch}
+                      options={exploreSearchOptions}
                     />
                     <Segmented
                       aria-label="模型范围"
@@ -1400,14 +1423,12 @@ function App() {
                       .sort()
                       .map((value) => ({ value, label: value }))}
                   />
-                  <Input
-                    className="w-[220px]"
-                    aria-label="过滤模型表格"
-                    prefix={<SearchOutlined aria-hidden="true" />}
-                    placeholder="过滤模型或厂商"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    allowClear
+                  <SearchChipInput
+                    ariaLabel="过滤模型表格"
+                    placeholder="过滤模型或厂商（回车或点选可多选）"
+                    value={tableSearch}
+                    onChange={setTableSearch}
+                    options={exploreSearchOptions}
                   />
                 </div>
               </div>
@@ -1428,7 +1449,7 @@ function App() {
                   pageSizeOptions: [15, 30, 60],
                   showTotal: (n) => `${n} 个模型族`,
                 }}
-                scroll={{ x: 1000 }}
+                scroll={{ x: 1050 }}
                 size="middle"
                 rowClassName={(r) => (r.openFrontier ? "frontier-row" : "")}
               />

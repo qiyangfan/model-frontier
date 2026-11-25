@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
-import { Alert, Drawer, Empty, Input, Select, Spin, Table, Tag } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Drawer, Empty, Select, Spin, Table, Tag } from "antd";
 import { NAMES, formatTime, money } from "./presentation.mjs";
+import {
+  emptySearch,
+  matchesSearchText,
+  searchOptions,
+  searchTermsOf,
+} from "./portal.mjs";
+import SearchChipInput from "./SearchChipInput.jsx";
 const TYPES = {
   added: "新增收录",
   removed: "不再列出",
@@ -49,7 +55,7 @@ export default function HistoryDrawer({
 }) {
   const [data, setData] = useState(null),
     [recordId, setRecordId] = useState(),
-    [query, setQuery] = useState(""),
+    [search, setSearch] = useState(() => emptySearch()),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(null);
   // 仅在打开时重置：关闭瞬间清空内容会让抽屉在滑出动画中闪成空状态。
@@ -57,7 +63,7 @@ export default function HistoryDrawer({
   useEffect(() => {
     if (!open) return;
     setRecordId(undefined);
-    setQuery("");
+    setSearch(emptySearch());
     setData(null);
   }, [open, modelId]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -89,10 +95,23 @@ export default function HistoryDrawer({
     };
   }, [open, modelId, recordId, lastRefresh]);
   const selected = data?.selected;
+  const searchTerms = searchTermsOf(search);
+  const historyOptions = useMemo(
+    () =>
+      searchOptions(
+        (selected?.items ?? []).map((i) => ({
+          name: i.name,
+          configuration: i.after?.configuration ?? i.before?.configuration,
+        })),
+        { includeCreator: false },
+      ),
+    [selected?.items],
+  );
   const items = (selected?.items ?? []).filter((i) =>
-    `${i.name} ${i.after?.configuration ?? i.before?.configuration ?? ""}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
+    matchesSearchText(
+      `${i.name} ${i.after?.configuration ?? i.before?.configuration ?? ""}`,
+      searchTerms,
+    ),
   );
   const columns = [
     {
@@ -189,14 +208,13 @@ export default function HistoryDrawer({
               label: `${formatTime(r.at)} · ${r.kind === "baseline" ? "起始快照" : `${r.counts.added + r.counts.removed + r.counts.updated} 条变化`}`,
             }))}
           />
-          <Input
+          <SearchChipInput
             className="min-w-0 flex-1"
-            aria-label="搜索历史配置"
-            prefix={<SearchOutlined aria-hidden="true" />}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索变化中的模型或配置"
-            allowClear
+            ariaLabel="搜索历史配置"
+            value={search}
+            onChange={setSearch}
+            options={historyOptions}
+            placeholder="搜索变化中的模型或配置（回车或点选可多选）"
           />
         </div>
         {busy ? (

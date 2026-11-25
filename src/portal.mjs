@@ -23,19 +23,85 @@ export function rankedModels(rows) {
   return rankBy(rows, (r) => r.composite);
 }
 // 搜索按紧凑形式比对（忽略空白、连字符与下划线差异）：用户打「gpt 6.2」或「gpt6.2」
-// 也能命中源站写法「GPT-6.2」。仅影响显示筛选，不改变分数、名次与前沿成员。
+// 也能命中源站写法「GPT-6.2」。支持单字符串、'|' 分隔多词或词条数组（任一命中即保留）；
+// 仅影响显示筛选，不改变分数、名次与前沿成员。
 const searchKey = (value) => value.toLowerCase().replace(/[\s\-_]+/g, "");
+export function splitSearchTerms(value) {
+  const raw = Array.isArray(value) ? value : String(value ?? "").split("|");
+  const seen = new Set();
+  const terms = [];
+  for (const part of raw) {
+    const trimmed = String(part ?? "").trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    terms.push(trimmed);
+  }
+  return terms;
+}
+export function effectiveSearchTerms(terms = [], draft = "") {
+  return splitSearchTerms([
+    ...splitSearchTerms(terms),
+    ...splitSearchTerms(draft),
+  ]);
+}
+export function emptySearch(initial = "") {
+  return { terms: splitSearchTerms(initial), draft: "" };
+}
+export function searchTermsOf(search) {
+  return effectiveSearchTerms(search?.terms, search?.draft);
+}
+export function encodeSearchTerms(search) {
+  return searchTermsOf(search).join("|");
+}
+export function matchesSearchText(haystack, query) {
+  const needles = splitSearchTerms(query).map(searchKey).filter(Boolean);
+  if (!needles.length) return true;
+  const target = searchKey(String(haystack ?? ""));
+  return needles.some((needle) => target.includes(needle));
+}
+export function searchOptions(rows = [], { includeCreator = true } = {}) {
+  const seen = new Set();
+  const models = [];
+  const creators = [];
+  for (const row of rows) {
+    const primary = String(row?.configuration ?? row?.name ?? "").trim();
+    const creator = String(row?.creator ?? "").trim();
+    if (primary && !seen.has(primary)) {
+      seen.add(primary);
+      models.push({
+        value: primary,
+        label:
+          creator && creator !== primary ? `${primary} · ${creator}` : primary,
+        searchText: `${row?.name ?? ""} ${row?.configuration ?? ""} ${creator}`,
+      });
+    }
+  }
+  if (includeCreator) {
+    for (const row of rows) {
+      const creator = String(row?.creator ?? "").trim();
+      if (creator && !seen.has(creator)) {
+        seen.add(creator);
+        creators.push({
+          value: creator,
+          label: `厂商 · ${creator}`,
+          searchText: creator,
+        });
+      }
+    }
+    creators.sort((a, b) => a.value.localeCompare(b.value));
+  }
+  return [...models, ...creators];
+}
 export function filterModels(
   rows,
   { query = "", creators = [], openness = "all", scoredOnly = false } = {},
 ) {
-  const needle = searchKey(query);
   return rows.filter(
     (r) =>
-      (!needle ||
-        searchKey(`${r.name} ${r.configuration ?? ""} ${r.creator}`).includes(
-          needle,
-        )) &&
+      matchesSearchText(
+        `${r.name} ${r.configuration ?? ""} ${r.creator}`,
+        query,
+      ) &&
       (creators.length === 0 || creators.includes(r.creator)) &&
       (openness === "all" ||
         (openness === "open" && r.openWeights === true) ||

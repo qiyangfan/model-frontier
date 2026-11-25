@@ -256,17 +256,75 @@ try {
   await legend.click();
   const chartStage = page.locator(".chart-stage");
   const plottedBefore = await chartStage.getAttribute("data-chart-points");
-  await page.getByLabel("帕累托搜索", { exact: true }).fill("MiMo");
+  const paretoSearch = page.getByRole("combobox", {
+    name: "帕累托搜索",
+    exact: true,
+  });
+  const secondVendor = await page.evaluate(() => {
+    const rows = [
+      ...document.querySelectorAll(".models-panel tr[data-row-key]"),
+    ];
+    for (const row of rows) {
+      const text = row.querySelector("td small")?.textContent?.trim();
+      if (text && !text.toLowerCase().includes("xiaomi")) return text;
+    }
+    return null;
+  });
+  await paretoSearch.fill("MiMo");
   await page.locator(".search-hint").waitFor();
-  assert.match(
-    await page.locator(".search-hint").innerText(),
-    /命中 \d+ 个模型/,
-  );
+  const singleHint = await page.locator(".search-hint").innerText();
+  assert.match(singleHint, /命中 \d+ 个模型/);
+  const singleMatchCount = Number(singleHint.match(/命中 (\d+) 个模型/)?.[1]);
+  // 回车生成第一个 chip，再叠加表格取到的另一厂商 chip 验证多选 OR 并集
+  await paretoSearch.press("Enter");
+  await page
+    .locator(".chart-heading .ant-select-selection-item")
+    .first()
+    .waitFor();
+  if (secondVendor) {
+    await paretoSearch.fill(secondVendor);
+    await paretoSearch.press("Enter");
+    // 等待 pq 参数同步入链（宽屏下两枚 chip 可能各自展示，窄一些时第二枚会折叠进 +N，故以 pq 词条与命中计数校验）
+    await page.waitForFunction((expected) => {
+      const pq =
+        new URLSearchParams(location.hash.split("?")[1] ?? "").get("pq") ?? "";
+      const terms = pq.split("|").map((s) => s.toLowerCase());
+      return terms.includes("mimo") && terms.includes(expected.toLowerCase());
+    }, secondVendor);
+    const multiHint = await page.locator(".search-hint").innerText();
+    const multiMatchCount = Number(multiHint.match(/命中 (\d+) 个模型/)?.[1]);
+    assert.ok(
+      multiMatchCount > singleMatchCount,
+      `多选 chip OR 并集命中数应增加: single=${singleMatchCount}, multi=${multiMatchCount}`,
+    );
+  }
+  await page.keyboard.press("Escape");
   assert.equal(
     await chartStage.getAttribute("data-chart-points"),
     plottedBefore,
     "搜索不应从图表移除点位",
   );
+  // 校验「榜单覆盖」列五枚来源徽章不越界重叠到右侧「前沿 / 状态」列
+  const badgeOverlap = await page.evaluate(() => {
+    const rows = [
+      ...document.querySelectorAll(".models-panel tr[data-row-key]"),
+    ];
+    if (!rows.length) return "no rows";
+    for (const row of rows.slice(0, 10)) {
+      const cells = row.querySelectorAll("td");
+      const covCell = cells[4];
+      const statusCell = cells[5];
+      if (!covCell || !statusCell) continue;
+      const statusRect = statusCell.getBoundingClientRect();
+      for (const badge of covCell.querySelectorAll("span")) {
+        if (badge.getBoundingClientRect().right > statusRect.left + 1) {
+          return `overlap: ${badge.textContent} right=${badge.getBoundingClientRect().right} statusLeft=${statusRect.left}`;
+        }
+      }
+    }
+    return null;
+  });
+  assert.equal(badgeOverlap, null, `榜单覆盖列存在溢出重叠: ${badgeOverlap}`);
   await mkdir("test-artifacts", { recursive: true });
   await page.screenshot({
     path: "test-artifacts/search-highlight.png",
@@ -297,7 +355,9 @@ try {
     .waitFor();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  await page.getByLabel("帕累托搜索", { exact: true }).fill("");
+  await page
+    .locator(".chart-heading .search-chip-select .ant-select-clear")
+    .click();
   await page.locator(".search-hint").waitFor({ state: "hidden" });
   assert.equal(
     await chartStage.getAttribute("data-chart-points"),

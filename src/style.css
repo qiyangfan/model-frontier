@@ -609,12 +609,12 @@ a {
   gap: 13px;
 }
 
-.table-filters .ant-select {
+.table-filters .ant-select:not(.search-chip-select) {
   width: 142px;
 }
 
-.table-filters .ant-input-affix-wrapper {
-  width: 210px;
+.table-filters .search-chip-select {
+  width: 240px;
 }
 
 .table-filters .ant-checkbox-wrapper {
@@ -942,8 +942,10 @@ a {
     width: 100%;
   }
 
-  .table-filters .ant-input-affix-wrapper {
+  .table-filters .search-chip-select {
     flex: 1;
+    width: auto;
+    min-width: 0;
   }
 
   .preset-cards {
@@ -1224,12 +1226,12 @@ a {
     font-size: 10px;
   }
 
-  .table-filters .ant-select {
+  .table-filters .ant-select:not(.search-chip-select) {
     width: 125px;
   }
 
-  .table-filters > .ant-input-affix-wrapper {
-    flex: 1 1 155px;
+  .table-filters > .search-chip-select {
+    flex: 1 1 200px;
     width: auto;
     min-width: 0;
   }
@@ -1592,12 +1594,12 @@ a {
 }
 
 /* 筛选行子元素布局：antd 组件内部宽度需经钩子类以特异性覆盖 */
-.ranking-filters > .ant-input-affix-wrapper {
+.ranking-filters > .search-chip-select {
   flex: 1;
-  min-width: 170px;
+  min-width: 200px;
 }
 
-.ranking-filters > .ant-select {
+.ranking-filters > .ant-select:not(.search-chip-select) {
   min-width: 145px;
   max-width: 200px;
 }
@@ -1811,11 +1813,12 @@ a {
     line-height: 30px;
   }
 
-  .ranking-filters > .ant-input-affix-wrapper {
+  .ranking-filters > .search-chip-select {
     flex-basis: 100%;
+    min-width: 0;
   }
 
-  .ranking-filters > .ant-select {
+  .ranking-filters > .ant-select:not(.search-chip-select) {
     min-width: 0;
     flex: 1;
     max-width: none;
