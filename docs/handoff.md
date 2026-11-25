@@ -1,8 +1,18 @@
 # Handoff
 
-最后更新：2026-11-25。**最新一轮：AA 行链接在模型代号缺失时回落榜单页（上轮评审登记的 url 死链风险落地处置）。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-25。**最新一轮：四处搜索框统一升级多选 chip，并修复模型全景表「榜单覆盖」列重叠。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：AA 行链接死链风险预防（2026-11-25 第二轮）
+## 最新一轮：多选 chip 搜索统一与「榜单覆盖」列重叠修复（2026-11-25 第三轮）
+
+- **需求与实现**：
+  - 探索页帕累托搜索、模型全景表过滤、排行榜搜索与历史快照配置搜索统一替换为 `src/SearchChipInput.jsx`（AntD `Select mode="tags"` + 自由词条/候选点选 + 实时草稿预览 + 多 chip 按 OR 并集匹配）。纯逻辑抽进 `src/portal.mjs`（`splitSearchTerms`、`matchesSearchText`、`searchOptions` 等），帕累托搜索同步并入 `searchKey` 归一化，与排行榜保持同口径。
+  - 分享链接 `q` / `pq` / `rq` 以 `|` 拼接多词条，兼容单词旧链接（ADR-0002 修订记录 + `share-link` / `ranking` spec 同步，归档 `openspec/archive/2026-11-25-unified-chip-search-and-coverage-layout/`）。
+  - 修复探索页「模型全景」表「榜单覆盖」列溢出重叠：接入第五源后 `MODELDIAL` 9 字母在 `width: 140` 下越界遮挡右侧「前沿 / 状态」列。改为 `MD` 缩写（与总览 `SOURCE_SYMBOL` / `LB` 一致，tooltip 仍标 `ModelDial`）、加 `flex-wrap` 与 `whitespace-nowrap`，列宽调至 `195`（`scroll.x: 1050`）。
+- **代码评审闭环（修复 4 项）**：① `SearchChipInput` 用 `latestRef`（在 `useEffect` 与 `emit` 更新）消除带草稿粘贴分隔符时 `onSearchSplit` 后紧跟的 `onSearch("")` 用旧闭包覆盖 chip；② `HistoryDrawer` 下拉候选去除 `creator: NAMES[i.source]`，与下方仅按名称/配置过滤的口径对齐；③ `SearchChipInput` 加 `filterSort` 将精确匹配项（如输入 `"DeepSeek"`）置顶，防止回车误选第一条具体模型，并把帕累托搜索框桌面宽度由 `260px` 放宽至 `280px`；④ `tests/e2e.mjs` / `tests/portal-e2e.mjs` 补齐三处搜索多 chip OR 并集验证，且按 E2E 数据纪律从当前表格行动态取厂商词条而非硬编码模型名。
+- **验证**：`npm run test:coverage`（行 98.69 / 分支 91.18 / 函数 97.00）、`npm run lint`、`npm run lint:css`、`npm run format:check`、`npm run build`、`npm run test:e2e:fixture`（三套 E2E 全绿，含「榜单覆盖」列零重叠边界盒断言）全部通过。
+- **本机网络排查与工具配置（非代码改动）**：实测公司出口直连外网但内网 DNS `10.3.114.2` 将 `huggingface.co` 污染解析至 `104.244.46.63` 导致 Arena `fetch failed`（`ECONNRESET`）；已在 owner 授权下通过 Homebrew 安装 Clash Verge Rev（2.5.10）并配置零节点直连 + 纯 IP DoH（`1.1.1.1` / `8.8.8.8`）分流（`direct-nameserver-follow-policy: true`，不开 TUN、关闭界面 DNS 覆写开关），重启 `4317` 后五源全部 `success`。
+
+## 上一轮：AA 行链接死链风险预防（2026-11-25 第二轮）
 
 - **处置（owner 问「有预防方案吗，或干脆不做」后的裁定落地）**：`parseAA` 的行链接在 `release.slug` 缺失时回落 `SOURCE_INFO.aa.url` 榜单页，不再拼 `/models/undefined` 死链。**方案依据是仓库现成先例**：Vals 与 ModelDial 的行链接本来就是「无按模型地址时指向榜单页」；否决了「url 置空 + 界面隐藏按钮」路径——三处渲染点（对比卡「源数据」、Portal「源站」列）都无条件渲染锚元素，置空会产生死控件，多改三处还引入分支。
 - **同轮裁定不做**：ModelDial `sourceDate` 严格校验维持不做——纯展示字段不参与准入、失败形态可见不隐蔽（异常文本直接显示而非错数据）、与 Vals 同类字段先例一致；触发条件登记：该日期将来参与逻辑判断时，再按 Arena 的 isValidArenaDate 模式补校验。
