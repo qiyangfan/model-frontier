@@ -647,6 +647,8 @@ test("AA missing-value sentinels become null instead of invalid prices", () => {
   assert.equal(r.costTask, null);
   assert.equal(r.priceInput, null);
   assert.equal(r.priceOutput, null);
+  // release 缺失时链接回落榜单页，不拼 /models/undefined 死链
+  assert.equal(r.url, SOURCE_INFO.aa.url);
 });
 
 test("LiveBench retains a source release label distinct from the file key", async () => {

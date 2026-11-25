@@ -206,7 +206,10 @@ export function parseAA(models) {
       deprecated: !!m.deprecated,
       // 源站自 2026-11-25 起不再披露估算标记；保留映射以便字段回归时零改动接回。
       estimated: !!m.intelligenceIndexIsEstimated,
-      url: `https://artificialanalysis.ai/models/${m.release?.slug}`,
+      // 代号缺失时回落榜单页：与 Vals/ModelDial 行链接同一先例，不拼 /models/undefined 死链。
+      url: m.release?.slug
+        ? `https://artificialanalysis.ai/models/${m.release.slug}`
+        : SOURCE_INFO.aa.url,
       configuration: m.name,
     }));
   return {
