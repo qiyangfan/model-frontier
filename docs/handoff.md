@@ -1,8 +1,16 @@
 # Handoff
 
-最后更新：2026-11-24。**最新一轮：Arena 覆盖核查（「缺 6.2 系列」不成立，不改抓取）+ LiveBench 单榜配置标签修复（整列只剩档位的缺陷）+ 搜索分隔符不敏感 + ADR-0025 跨源身份维持源站标签口径 + `.qoder/` 进 prettier 忽略。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-25。**最新一轮：ModelDial 第五评分源落地（缺榜罚分经重校后移除）+ AA 摄取回归页面内联载荷（源站撤掉加密文件通道）。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：Arena 覆盖核查、LiveBench 配置标签与搜索修复（2026-11-24）
+## 最新一轮：ModelDial 第五源落地与 AA 内联载荷适配（2026-11-25）
+
+- **ModelDial 成为第五评分源（已推送 229d272，ADR-0026）**：只进评分不进成本源（其成本是私有题库计费，与「干一个任务花多少钱」不同单位，不污染三源成本几何平均）；适配器只取 Coding 榜、五轴分按站点 weights 加权自算总分；缺榜罚分（ADR-0023 每榜 15 分）三种独立方法均无法复现原依据，经 owner 授权重校后移除（罚分 0/10/15/20 性价比前 15 几乎不变）；有综合分模型 58→65，性价比榜 42 个无新进；源数写死两处收敛到 `SOURCE_NAMES` 派生，CSV 追加 ModelDial 两列。
+- **AA 摄取通道死亡与适配（ADR-0027）**：源站 2026-11-25 删除全部 `/data/*.txt`（7 个 hash 全 404，带完整浏览器标头与 cookie 仍 404，排除反爬），ADR-0006 的「manifest → 加密文件」链路第二步死亡且不会自愈。**官网对访客完全正常**——无头 Chrome 实测表格 205 行、全程不请求数据文件，数据已回到页面 Flight 内联（`initialModels`，290 条当前榜配置）。摄取改为「拼分片 → 字符串感知括号配对切数组 → parseAA」，删 manifest 正则与 AES 解密管道；字段随载荷改名（速度 `outputSpeed`、延迟 `timeToFirstToken`、代号 `release.slug`）；估算标记源站不再披露，行级恒 false（「纳入估算」开关默认关，不受影响）；载荷收缩 766→290 记录在案，`AA_MIN_ROWS` 100→200，跌幅闸门豁免 AA（相对比对会把契约迁移永久拒绝），其余四源闸门不变。
+- **诊断教训（本轮新增）**：「源站报 404 ≠ 官网崩了」——访客视角与机器通道可以一个正常一个死亡，诊断要先起无头浏览器对照真实访客路径（看它请求什么、渲染什么），再下结论；本例第一版「源站事故论」即因此修正。
+- **验证（2026-11-25 本机）**：单测 179/179、覆盖率 98.65/91.55/97.21 过门禁、build、ESLint、Prettier 全绿；夹具三套 E2E 全过；4317 实机核对五源全 success，AA 条数 290、版本 v5.0、来源卡新文案，Claude Fable 5.2 覆盖 5 榜。
+- **遗留**：CI 因 GitHub billing 锁连续数批未真跑（229d272、5bf1579 等，任务 3 秒即败「account is locked due to a billing issue」），锁解锁后需统一 rerun。
+
+## 上一轮：Arena 覆盖核查、LiveBench 配置标签与搜索修复（2026-11-24）
 
 - **Arena「缺 6.2 系列」核查（结论：不成立，不改抓取）**：单榜 427 条为官方 HF `text/latest` overall 全量（实测该文件 29 个分类共 11,320 行，单一发布日期 2026-11-22；`text/full` 是 2023 年以来 131 万行 / 280 期历史档案，不是更大的当前榜）。GPT-6.2 Astra / Sol 均在榜（Elo 1413.3 / 1413.7、票数 5,268 / 5,526、第 141 / 142 名）——「没有」的印象来自排名深 + 搜索字面匹配。覆盖判断：AA 766 载荷仅 158 条有 v5 分（当期 127 条 / 70 家族，ADR-0018），Arena 408 家族反而是融合里覆盖最广的榜（58 个两榜家族中 45 个由 Arena 提供第二榜）；缺榜罚分对头部无影响（前 12 名四榜齐全、缺榜 0；Claude Fable 5.1 缺 Vals −15、Wonder Full 缺 Arena/LB −30，与本次疑点无关）。
 - **LiveBench 单榜「模型配置」列修复**：源站把模型名与档位分字段披露（displayName + effort），而单榜列 / 对比页「配置」行 / CSV 只读 `configuration`，导致整列只剩 xhigh/max/high。修复在适配器层把模型名并入配置标签（`Name (max)`）；displayName 已自带档位后缀（带空格 `Name (xhigh)` 与无空格 `Name(xhigh)` 两种写法）时不重复追加；缺 effort 回落为模型名（不再显示无名称的「未确认」）。一次性影响：历史抽屉下一次快照把 41 条 LB 记成配置指纹变更。
@@ -423,13 +431,16 @@ npm run test:e2e && npm run test:portal && npm run test:evidence
 
 ## 实现要点与坑（改 `server/adapters.mjs` 的 AA 链路前必读）
 
-- **manifest 在原始 HTML 里是转义形态**：Flight 分片是 JS 字符串字面量，引号全部写成 `\"`，因此 `MANIFEST_RE` 必须容忍 `\\?"` 而不是直接匹配 `"manifest":{"path":...}`；否则在浏览器 DevTools 里看着对、代码里永远匹配不上。
-- **解密后还有一层 gzip**：`crypto.subtle.decrypt` 出来的是 gzip 字节，漏掉 `gunzipSync` 会得到乱码且不报错——要到 `JSON.parse` 才失败，容易误判成加密方案变更（错误信息已区分「解密失败」与「解压或解析失败」）。
-- **`initialModels` 只有 273 条且 0 条 deprecated**：拿它当全量用不会崩，只会安静少掉六成模型和全部历史 / 估算配置，属于最难发现的一类回归——这正是跌幅闸门存在的原因。
-- **官方免费 API 的 1 位小数是服务端行为**，不是显示层四舍五入，客户端无法恢复精度。
-- **AA 单站耗时几乎全是网络**：本地实测三轮，页面约 5–9 秒、数据文件（约 140 KB）约 8–12 秒，而解密 + gunzip + 解析合计仅约 25 毫秒。ADR 里若再出现「0.3–0.7 秒」一类数字，那是只量了本地计算，属失实。
+- **当前链路（ADR-0027，2026-11-25 起）**：抓页面 → `aaFlightText` 拼 `self.__next_f.push` 分片 → `aaInlineModels` 切 `initialModels` 数组 → `parseAA`。单请求，无解密。
+- **Flight 分片是 JS 字符串字面量**，引号在原始 HTML 里呈转义形态；`JSON.parse` 恰好能还原其转义，不要自己写正则去反转义。
+- **括号配对必须感知字符串字面量**：模型名、厂商名里会出现 `[]`、`{}`、引号与反斜杠，盲数括号会切错位置；`aaInlineModels` 的 `inStr`/`esc` 状态机就是为此。
+- **`initialModels` 只含当前榜配置（290 条左右）**：历史条目与估算标记（`intelligenceIndexIsEstimated`）源站不再提供，行级 `estimated` 恒 false——不要把它当 bug 修；全量 766 条的通道已死，别试图「找回」。
+- **结构变化的报错阶梯**：找不到 Flight 分片 → 找不到 `initialModels` → 数组不完整 → JSON 不合法，全部保留缓存不静默；诊断时按这个顺序对号。
+- **跌幅闸门豁免 AA**：store 的相对跌幅比对（上次 ≥200 且这次 <一半）会把「全量基线 → 内联基线」这类契约迁移永久拒绝；AA 的完整性由适配器 `AA_MIN_ROWS`（200）把守，其余四源闸门不变（ADR-0027）。
+- **官方免费 API 的 1 位小数是服务端行为**，不是显示层四舍五入，客户端无法恢复精度；且无 `isOpenWeights`，仍是备选里的下策（Pro 档字段更全，届时另立 ADR）。
+- **AA 单站耗时几乎全是网络**：单请求抓 1.3 MB 级页面，本地解析合计毫秒级。
 - **开放权重闸门的分母是可评估的对象行数**，不是 `models.length`：否则载荷里混进 `null` 会把「全都有标记」误判成缺失，报错信息也会指错方向。
-- **三站抓取统一走 `requestSource`**：`getText` / `getBuffer` 只差 `Accept`（前者按原值传 `text/html,application/json,text/csv,*/*`，后者用默认 `*/*`），改抓取行为只改这一处。`lbMetadata` 的 `scalar` 查预编译正则表 `LB_SCALAR_RE`，**未登记的键返回 null**——不要图省事改成 `match(undefined)`，那会命中整个 body。
+- **抓取统一走 `requestSource`**：`getText` 只差 `Accept` 按原值传 `text/html,application/json,text/csv,*/*`，改抓取行为只改这一处。`lbMetadata` 的 `scalar` 查预编译正则表 `LB_SCALAR_RE`，**未登记的键返回 null**——不要图省事改成 `match(undefined)`，那会命中整个 body。
 - **`parseAA` 的行过滤必须防非对象条目**：`null.name` 会抛 TypeError，该函数上方闸门本就写了 `m && typeof m === "object"`，两处标准要一致。
 
 ## 实现要点与坑（改 `src/Chart.jsx` 前必读）
@@ -455,7 +466,7 @@ npm run test:e2e && npm run test:portal && npm run test:evidence
 
 - `src/Chart.jsx` 前沿散点 / 斩杀区；`src/main.jsx` 探索页（应用外壳、分享状态、模型全景表）；`src/Portal.jsx` 门户六页（排行榜 / 对比 / chip）。
 - `src/analysis.mjs` 评分、帕累托与来源组合队列（`coverageCohorts`；`dominatedBy` 在此计算，供斩杀区与 tooltip 共用）；`src/portal.mjs` 榜单行池、证据深度摘要与导出；`src/share.mjs` 分享链接编解码；`src/Evidence.jsx` 证据徽标。
-- `server/adapters.mjs` 三站摄取（AA 走 manifest 加密链路，见上）；`server/store.mjs` 抓取编排与落库闸门；`server/index.mjs` 单服务前后一体 + 定时抓取；`data/snapshot.json` 为聚合产物（已退出版本控制，ADR-0007）。
+- `server/adapters.mjs` 五站摄取（AA 走页面内联载荷，见上）；`server/store.mjs` 抓取编排与落库闸门；`server/index.mjs` 单服务前后一体 + 定时抓取；`data/snapshot.json` 为聚合产物（已退出版本控制，ADR-0007）。
 - 规格在 `openspec/specs/<能力>/spec.md`；ADR 在 `docs/adr/`。
 
 ### 追加迭代：编程优先排序视图（2026-11-11 深夜，ADR-0022）

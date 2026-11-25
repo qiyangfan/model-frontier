@@ -144,16 +144,25 @@ test("a suspicious collapse in row count is rejected instead of silently replaci
     name: "Model " + i,
     score: i,
   }));
-  await store.refreshAll({ aa: async () => ({ rows }) });
-  assert.equal(store.view().sources.aa.count, 240);
+  await store.refreshAll({ livebench: async () => ({ rows }) });
+  assert.equal(store.view().sources.livebench.count, 240);
   // 源站只下发部分数据时格式完全合法，必须按上次成功缓存比对后拒绝
-  await store.refreshAll({ aa: async () => ({ rows: rows.slice(0, 100) }) });
-  assert.equal(store.view().sources.aa.count, 240);
-  assert.match(store.view().sources.aa.error, /疑似不完整/);
-  assert.equal(store.view().sources.aa.stale, true);
+  await store.refreshAll({
+    livebench: async () => ({ rows: rows.slice(0, 100) }),
+  });
+  assert.equal(store.view().sources.livebench.count, 240);
+  assert.match(store.view().sources.livebench.error, /疑似不完整/);
+  assert.equal(store.view().sources.livebench.stale, true);
   // 正常幅度的波动仍然接受
-  await store.refreshAll({ aa: async () => ({ rows: rows.slice(0, 200) }) });
-  assert.equal(store.view().sources.aa.count, 200);
+  await store.refreshAll({
+    livebench: async () => ({ rows: rows.slice(0, 200) }),
+  });
+  assert.equal(store.view().sources.livebench.count, 200);
+  assert.equal(store.view().sources.livebench.error, null);
+  // AA 不受相对跌幅闸门约束：内联载荷与旧加密通道的全量基线不是同一口径，
+  // 相对比对会把契约迁移永久拒之门外；其下限由适配器 AA_MIN_ROWS 把守（ADR-0027）
+  await store.refreshAll({ aa: async () => ({ rows: rows.slice(0, 50) }) });
+  assert.equal(store.view().sources.aa.count, 50);
   assert.equal(store.view().sources.aa.error, null);
   // 小体量来源不受该闸门影响
   await store.refreshAll({ vals: async () => ({ rows: rows.slice(0, 40) }) });

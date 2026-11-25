@@ -2,7 +2,6 @@ import { parquetReadObjects } from "hyparquet";
 import { licenseState } from "./identity.mjs";
 import * as cheerio from "cheerio";
 import { parse } from "csv-parse/sync";
-import { gunzipSync } from "node:zlib";
 import { SOURCE_NAMES } from "../shared/sources.mjs";
 // 展示名从 shared/sources.mjs 派生，只有 url 与口径说明按源各写一份。
 export const SOURCE_INFO = {
@@ -93,12 +92,15 @@ export async function getText(url, timeout = SOURCE_TIMEOUT, retry = true) {
     retry,
   );
 }
-// AA 的全量模型不再随页面下发，改为放在 manifest 指向的加密文件里：AES-256-GCM 加密后
-// gzip 的 JSON。密钥写在同一个 Flight 分片中，IV 取 SHA-256(key) 前 12 字节，认证标签 128 位。
-// 见 docs/adr/0006。 Flight 分片是 JS 字符串字面量，引号在原始 HTML 里呈转义形态。
-const MANIFEST_RE =
-  /manifest\\?":\{\\?"path\\?":\\?"([^"\\]+)\\?",\\?"key\\?":\\?"([0-9a-fA-F]+)\\?"\}/;
-const AA_MIN_ROWS = 100;
+// AA 2026-11-25 起撤掉 manifest 加密文件通道（/data/*.txt 全部 404），当前榜全部配置
+// 回到页面 Flight 内联：self.__next_f.push 分片拼出载荷文本，模型数组挂在组件参数
+// initialModels 上。分片是 JS 字符串字面量，引号在原始 HTML 里呈转义形态。
+// 见 docs/adr/0027（取代 0006 的加密链路）。
+const FLIGHT_CHUNK_RE = /self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g;
+const AA_MODELS_MARK = '"initialModels":';
+// 内联载荷只含当前榜配置（2026-11-25 实测 290 条），历史条目与估算标记源站不再提供。
+// 下限 200 兜底拦截半截载荷；更深的收缩属源站口径变化，走 ADR 流程而非静默放行。
+const AA_MIN_ROWS = 200;
 const AA_OPEN_FLAG_RATIO = 0.9;
 // 指数版本决定分数口径：v4.3.2 与 v5.0 的基准集不同，跨版本不可比。匹配带全称的标题
 // 形式，避开更新日志里 "Updated to Intelligence Index v5" 的简称。
@@ -108,40 +110,57 @@ export function aaIndexVersion(html) {
   const version = AA_INDEX_VERSION_RE.exec(String(html))?.[1];
   return version ? `Intelligence Index v${version}` : null;
 }
-export function aaManifest(html) {
-  const m = MANIFEST_RE.exec(String(html));
-  if (!m) throw new Error("AA 页面结构变化：找不到数据清单 manifest");
-  return { path: m[1], key: m[2] };
+// 拼接全部 Flight 文本分片。分片是 JS 字符串字面量，JSON.parse 恰好能还原其转义。
+export function aaFlightText(html) {
+  let text = "";
+  for (const m of String(html).matchAll(FLIGHT_CHUNK_RE)) {
+    try {
+      text += JSON.parse(m[1]);
+    } catch {
+      throw new Error("AA 页面结构变化：Flight 分片不是合法字符串字面量");
+    }
+  }
+  if (!text) throw new Error("AA 页面结构变化：找不到 Flight 数据分片");
+  return text;
 }
-export async function decryptAAGzip(buffer, keyHex) {
-  const key = Buffer.from(keyHex, "hex");
-  if (key.length !== 32) throw new Error("AA 数据密钥长度异常");
-  const iv = new Uint8Array(await crypto.subtle.digest("SHA-256", key)).slice(
-    0,
-    12,
-  );
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "AES-GCM" },
-    false,
-    ["decrypt"],
-  );
-  let packed;
-  try {
-    packed = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv, tagLength: 128 },
-      cryptoKey,
-      buffer,
-    );
-  } catch {
-    throw new Error("AA 数据解密失败：加密方案可能已变更");
+// 从 Flight 文本里切出 initialModels 数组。括号配对必须感知字符串字面量：
+// 模型名、厂商名里都可能出现 []{} 与引号。
+export function aaInlineModels(flight) {
+  const markAt = flight.indexOf(AA_MODELS_MARK);
+  if (markAt < 0)
+    throw new Error("AA 页面结构变化：找不到内联模型数据 initialModels");
+  const start = flight.indexOf("[", markAt + AA_MODELS_MARK.length);
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let end = -1;
+  for (let i = start; i < flight.length; i++) {
+    const c = flight[i];
+    if (esc) {
+      esc = false;
+    } else if (inStr) {
+      if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true;
+    } else if (c === "[" || c === "{") {
+      depth++;
+    } else if (c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
   }
+  if (end < 0) throw new Error("AA 页面结构变化：initialModels 数组不完整");
+  let models;
   try {
-    return JSON.parse(gunzipSync(packed).toString("utf8"));
+    models = JSON.parse(flight.slice(start, end));
   } catch {
-    throw new Error("AA 数据解压或解析失败");
+    throw new Error("AA 内联数据解析失败：JSON 不合法");
   }
+  return models;
 }
 export function parseAA(models) {
   if (!Array.isArray(models))
@@ -172,25 +191,24 @@ export function parseAA(models) {
       priceOutput: Number.isFinite(m.price1mOutputTokens)
         ? m.price1mOutputTokens
         : null,
-      speed: Number.isFinite(m.medianOutputTokensPerSecond)
-        ? m.medianOutputTokensPerSecond
-        : null,
-      latency: Number.isFinite(m.medianTimeToFirstTokenSeconds)
-        ? m.medianTimeToFirstTokenSeconds
-        : null,
+      // 内联载荷的字段名与旧加密载荷不同：速度叫 outputSpeed、延迟叫 timeToFirstToken，
+      // 模型代号挪进 release 子对象（ADR-0027）。
+      speed: Number.isFinite(m.outputSpeed) ? m.outputSpeed : null,
+      latency: Number.isFinite(m.timeToFirstToken) ? m.timeToFirstToken : null,
       creator: m.modelCreatorName,
       openWeights: m.isOpenWeights,
       deprecated: !!m.deprecated,
+      // 源站自 2026-11-25 起不再披露估算标记；保留映射以便字段回归时零改动接回。
       estimated: !!m.intelligenceIndexIsEstimated,
-      url: `https://artificialanalysis.ai/models/${m.slug}`,
+      url: `https://artificialanalysis.ai/models/${m.release?.slug}`,
       configuration: m.name,
     }));
   return {
     rows,
     sourceDate: null,
     notes: [
-      "源站页面 manifest 指向的加密数据文件；保留完整精度、历史条目、估算标记和推理档位。",
-      "开放权重、历史与估算状态均取自源站字段，不按模型名推测。",
+      "源站把当前榜全部配置内联在页面数据载荷里；只含当前榜，历史条目与估算标记源站不再提供。",
+      "开放权重状态取自源站字段，不按模型名推测；分数与成本保留源站原始精度。",
     ],
   };
 }
@@ -628,20 +646,9 @@ export async function fetchLivebench() {
   }
   throw new Error("LiveBench 发布文件未找到；保留上次数据");
 }
-async function getBuffer(url, timeout = SOURCE_TIMEOUT) {
-  return requestSource(url, timeout, "*/*", async (response) =>
-    Buffer.from(await response.arrayBuffer()),
-  );
-}
 async function fetchAA() {
   const html = await getText(SOURCE_INFO.aa.url);
-  const { path, key } = aaManifest(html);
-  const parsed = parseAA(
-    await decryptAAGzip(
-      await getBuffer(new URL(path, SOURCE_INFO.aa.url)),
-      key,
-    ),
-  );
+  const parsed = parseAA(aaInlineModels(aaFlightText(html)));
   return { ...parsed, sourceDate: aaIndexVersion(html) };
 }
 // Arena 文本总榜使用官方单文件快照，避免依赖页面渲染或不稳定的筛选服务。
@@ -820,8 +827,8 @@ export async function fetchModelDial() {
   return parseModelDial(doc);
 }
 export async function fetchArena() {
-  // hyparquet 内部对 file 做 new DataView()，必须传真 ArrayBuffer；getBuffer 返回的
-  // Node Buffer 会抛 "First argument to DataView constructor must be an ArrayBuffer"。
+  // hyparquet 内部对 file 做 new DataView()，必须传真 ArrayBuffer；
+  // Node Buffer 包装会抛 "First argument to DataView constructor must be an ArrayBuffer"。
   const file = await requestSource(
     ARENA_DATA_URL,
     SOURCE_TIMEOUT,

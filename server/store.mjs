@@ -119,7 +119,10 @@ async function refreshSource(id, fetcher) {
     // 覆盖新基准套件的配置发布 Intelligence Index，载荷本身仍然完整，用有分条数比对
     // 会把这种源站口径收缩误判成抓取不完整。见 docs/adr/0018。
     const rows = result.rows?.length ?? 0;
-    if (before >= 200 && rows < before / 2)
+    // AA 豁免相对跌幅比对：源站 2026-11-25 回归页面内联载荷后只含当前榜配置（290 条
+    // 左右），与旧加密通道的全量 766 条不是同一口径，首次成功刷新会被旧基线永久拒绝；
+    // 其完整性改由适配器内 AA_MIN_ROWS 绝对下限把守。见 docs/adr/0027。
+    if (id !== "aa" && before >= 200 && rows < before / 2)
       throw new Error(
         `源站数据疑似不完整：模型配置从 ${before} 条降为 ${rows} 条，拒绝替换缓存`,
       );

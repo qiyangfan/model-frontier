@@ -1,13 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCipheriv, createHash } from "node:crypto";
-import { gzipSync } from "node:zlib";
 import {
   SOURCE_INFO,
   FETCHERS,
   ARENA_FORMAT,
-  aaManifest,
-  decryptAAGzip,
+  aaFlightText,
+  aaInlineModels,
   aaIndexVersion,
   parseAA,
   parseArena,
@@ -16,39 +14,25 @@ import {
   parseModelDial,
 } from "../server/adapters.mjs";
 
-// AA 的全量数据是 AES-256-GCM 加密后 gzip 的 JSON，IV 取 SHA-256(key) 前 12 字节。
-const KEY = "aa".repeat(32);
-const dataIv = (keyHex) =>
-  createHash("sha256")
-    .update(Buffer.from(keyHex, "hex"))
-    .digest()
-    .subarray(0, 12);
-function seal(models, keyHex = KEY, { gzip = true } = {}) {
-  const key = Buffer.from(keyHex, "hex");
-  const cipher = createCipheriv("aes-256-gcm", key, dataIv(keyHex));
-  const plain = gzip
-    ? gzipSync(JSON.stringify(models))
-    : Buffer.from(JSON.stringify(models));
-  const body = Buffer.concat([
-    cipher.update(plain),
-    cipher.final(),
-    cipher.getAuthTag(),
-  ]);
-  // Flight 分片是 JS 字符串字面量，引号在原始 HTML 里必须呈转义形态。
-  const html =
-    '<script>self.__next_f.push([1,"20:[\\"$\\",\\"div\\",null,{' +
-    '\\"manifest\\":{\\"path\\":\\"/data/fixture.txt\\",\\"key\\":\\"' +
-    keyHex +
-    '\\"}}]"]))</script>';
-  return { html, body };
+// AA 的内联载荷挂在 Flight 文本分片里；分片是 JS 字符串字面量，引号呈转义形态。
+// 按真实页面形态拆成多段 push。
+function inlineHtml(models, { chunks = 2 } = {}) {
+  const flight = '"initialModels":' + JSON.stringify(models);
+  const size = Math.ceil(flight.length / chunks);
+  const pushes = [];
+  for (let i = 0; i < flight.length; i += size)
+    pushes.push(
+      "<script>self.__next_f.push([1," +
+        JSON.stringify(flight.slice(i, i + size)) +
+        "])</script>",
+    );
+  return pushes.join("");
 }
-function serveAA({ html, body }) {
+function serveAA(html) {
   const original = globalThis.fetch;
   globalThis.fetch = async (input) => {
     const url = typeof input === "string" ? input : String(input?.url ?? input);
     if (url === SOURCE_INFO.aa.url) return new Response(html, { status: 200 });
-    if (url.endsWith("/data/fixture.txt"))
-      return new Response(body, { status: 200 });
     throw new Error("测试未预期的请求：" + url);
   };
   return () => {
@@ -57,7 +41,8 @@ function serveAA({ html, body }) {
 }
 const filler = (n) =>
   Array.from({ length: n }, (_, i) => ({
-    slug: `model-${i}`,
+    id: `id-${i}`,
+    release: { slug: `model-${i}`, name: `Model ${i}` },
     name: `Model ${i}`,
     shortName: `Model ${i}`,
     deprecated: false,
@@ -66,8 +51,8 @@ const filler = (n) =>
     intelligenceIndexCostPerTask: i % 4 === 0 ? 0.01 * i : "$undefined",
     price1mInputTokens: 1 + i,
     price1mOutputTokens: 2 + i,
-    medianOutputTokensPerSecond: 100 + i,
-    medianTimeToFirstTokenSeconds: 0.5,
+    outputSpeed: 100 + i,
+    timeToFirstToken: 0.5,
     modelCreatorName: "Creator",
   }));
 test("AA index version is recorded because v4.3.2 and v5.0 scores are not comparable", () => {
@@ -82,36 +67,38 @@ test("AA index version is recorded because v4.3.2 and v5.0 scores are not compar
   );
   assert.equal(aaIndexVersion("<h1>challenge</h1>"), null);
 });
-test("AA manifest ingestion retains full precision, cost, effort, history and openness", async () => {
-  const restore = serveAA(
-    seal([
-      ...filler(119),
+test("AA inline ingestion retains full precision, cost, effort and openness", async () => {
+  const html =
+    '<meta content="Artificial Analysis Intelligence Index v5.0">' +
+    inlineHtml([
+      ...filler(199),
       {
-        slug: "legacy-99",
+        id: "legacy-99",
+        release: { slug: "legacy-99", name: "Legacy 99" },
         name: "Legacy 99 (max)",
         shortName: null,
         deprecated: true,
         isOpenWeights: true,
         intelligenceIndex: 12.345,
         intelligenceIndexCostPerTask: 0.002,
-        intelligenceIndexIsEstimated: true,
         price1mInputTokens: "$undefined",
         price1mOutputTokens: "$undefined",
-        medianOutputTokensPerSecond: 50,
-        medianTimeToFirstTokenSeconds: 1.5,
+        outputSpeed: 50,
+        timeToFirstToken: 1.5,
         modelCreatorName: "Old",
       },
-    ]),
-  );
+    ]);
+  const restore = serveAA(html);
   try {
     const result = await FETCHERS.aa();
-    assert.equal(result.rows.length, 120);
+    assert.equal(result.rows.length, 200);
     const r = result.rows.find((x) => x.name === "Legacy 99 (max)");
     assert.equal(r.score, 12.345);
     assert.equal(r.costTask, 0.002);
     assert.equal(r.openWeights, true);
     assert.equal(r.deprecated, true);
-    assert.equal(r.estimated, true);
+    // 源站 2026-11-25 起不再披露估算标记：映射保留，字段缺席时恒为 false（ADR-0027）
+    assert.equal(r.estimated, false);
     assert.equal(r.priceInput, null);
     assert.equal(r.priceOutput, null);
     assert.equal(r.speed, 50);
@@ -120,44 +107,71 @@ test("AA manifest ingestion retains full precision, cost, effort, history and op
     assert.equal(r.url, "https://artificialanalysis.ai/models/legacy-99");
     assert.equal(r.configuration, "Legacy 99 (max)");
     // shortName 缺失时回落到 name；isOpenWeights 逐行保留
-    assert.equal(result.rows.filter((x) => x.openWeights === false).length, 59);
-    assert.equal(result.sourceDate, null);
+    assert.equal(result.rows.filter((x) => x.openWeights === false).length, 99);
+    assert.equal(result.sourceDate, "Intelligence Index v5.0");
   } finally {
     restore();
   }
 });
+test("AA flight chunks concatenate across pushes and slicing respects strings", () => {
+  const models = [
+    ...filler(5),
+    // 模型名与厂商名里出现括号、引号与反斜杠：配对切割必须跳过字符串字面量
+    {
+      id: "tricky",
+      release: { slug: "tricky", name: 'Weird ["model"] {} \\ "x"' },
+      name: 'Weird ["model"] {} \\ "x"',
+      shortName: null,
+      deprecated: false,
+      isOpenWeights: true,
+      intelligenceIndex: 1,
+      intelligenceIndexCostPerTask: "$undefined",
+      price1mInputTokens: "$undefined",
+      price1mOutputTokens: "$undefined",
+      outputSpeed: "$undefined",
+      timeToFirstToken: "$undefined",
+      modelCreatorName: 'C["1"]{\\}',
+    },
+  ];
+  const flight = aaFlightText(inlineHtml(models, { chunks: 3 }));
+  assert.deepEqual(aaInlineModels(flight), models);
+});
 test("AA rejects truncated payloads and payloads missing openness metadata", () => {
-  assert.throws(() => parseAA(filler(99)), /不完整/);
-  const noFlags = filler(120).map((m, i) =>
-    i < 30 ? { ...m, isOpenWeights: undefined } : m,
+  assert.throws(() => parseAA(filler(199)), /不完整/);
+  const noFlags = filler(200).map((m, i) =>
+    i < 50 ? { ...m, isOpenWeights: undefined } : m,
   );
   assert.throws(() => parseAA(noFlags), /开放权重/);
   assert.throws(() => parseAA("<h1>challenge</h1>"), /模型列表不是数组/);
   // 载荷里混进非对象条目时跳过该行，而不是让 typeof 解引抛 TypeError
-  const mixed = [null, undefined, "x", 42, ...filler(120)];
-  assert.equal(parseAA(mixed).rows.length, 120);
+  const mixed = [null, undefined, "x", 42, ...filler(200)];
+  assert.equal(parseAA(mixed).rows.length, 200);
 });
-test("AA manifest and payload failures fail clearly instead of returning invented data", async () => {
-  assert.throws(() => aaManifest("<h1>challenge</h1>"), /结构变化/);
-  const models = filler(120);
-  // 密钥不对：AES-GCM 认证失败
-  const wrong = seal(models, "bb".repeat(32));
-  await assert.rejects(() => decryptAAGzip(wrong.body, KEY), /解密失败/);
-  // 密钥不是 32 字节时明确失败，而不是让 WebCrypto 抛难懂的错误
-  await assert.rejects(() => decryptAAGzip(wrong.body, "abcd"), /密钥长度异常/);
-  // 密文对但明文不是 gzip
-  const ungzipped = seal(models, KEY, { gzip: false });
-  await assert.rejects(
-    () => decryptAAGzip(ungzipped.body, KEY),
-    /解压或解析失败/,
+test("AA inline failures fail clearly instead of returning invented data", async () => {
+  // 挑战页/壳页：没有 Flight 分片
+  assert.throws(
+    () => aaFlightText("<h1>challenge</h1>"),
+    /找不到 Flight 数据分片/,
   );
-  // 页面拿不到 manifest 时，整条链路在第一步就明确失败
-  const restore = serveAA({
-    html: "<h1>challenge</h1>",
-    body: Buffer.alloc(0),
-  });
+  // 分片不是合法字符串字面量
+  assert.throws(
+    () => aaFlightText('<script>self.__next_f.push([1,"\\x"])</script>'),
+    /不是合法字符串字面量/,
+  );
+  // 没有 initialModels 标记
+  assert.throws(() => aaInlineModels('"otherKey":[1]'), /找不到内联模型数据/);
+  // 数组被截断
+  const flight = '"initialModels":' + JSON.stringify(filler(200));
+  assert.throws(
+    () => aaInlineModels(flight.slice(0, flight.length - 30)),
+    /数组不完整/,
+  );
+  // 标记后不是合法 JSON
+  assert.throws(() => aaInlineModels('"initialModels":["\\x"]'), /解析失败/);
+  // 整条链路在第一步就明确失败
+  const restore = serveAA("<h1>challenge</h1>");
   try {
-    await assert.rejects(() => FETCHERS.aa(), /结构变化/);
+    await assert.rejects(() => FETCHERS.aa(), /找不到 Flight 数据分片/);
   } finally {
     restore();
   }
@@ -615,7 +629,7 @@ test("parser structure drift fails clearly instead of returning invented data", 
 });
 test("AA missing-value sentinels become null instead of invalid prices", () => {
   const r = parseAA([
-    ...filler(119),
+    ...filler(199),
     {
       name: "Missing costs",
       isOpenWeights: true,
