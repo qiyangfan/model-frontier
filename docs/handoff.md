@@ -1,8 +1,18 @@
 # Handoff
 
-最后更新：2026-11-25。**最新一轮：四处搜索框统一升级多选 chip，并修复模型全景表「榜单覆盖」列重叠。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-25。**最新一轮：退役无效「允许 AA 估算」「排除历史配置」开关，仅保留「排除过期 / 失败缓存」。** 以下"最新一轮"优先于后面的历史记录。
 
-## 最新一轮：多选 chip 搜索统一与「榜单覆盖」列重叠修复（2026-11-25 第三轮）
+## 最新一轮：退役死质量开关（2026-11-25 第四轮）
+
+- **背景与决策**：经核查，AA 回归内联 `initialModels`（ADR-0027）后五源均无 `estimated` 字段（0/290），且 766 条历史档案下线后当前内联 290 条 `deprecated` 全为 `false`；同时 `shared/representatives.mjs` 本就按 `!deprecated` 优先选取，仅「排除过期 / 失败缓存」（`excludeStale`）在刷新失败或超 24 小时时真实生效。按「不留存永不触发的假控件、不为想象的将来预建死分支」原则，直接删除前两套开关与参数，不采用条件隐藏。
+- **改动**：
+  - 核心层：`src/analysis.mjs`（`combinedCostProfile` / `combinedCost` / `majorityMatch` / `majorityRecords` / `analyze`）、`src/portal.mjs`（`nativeRanking` / `coverageSummary`）、`src/evidence.mjs`（`applyEvidencePolicy` 收敛为只处理 `excludeStale`）、`src/share.mjs`（退役 `est` / `eh` / `ne` / `nh`，旧链接按退役参数静默忽略）。
+  - 界面层：`src/main.jsx` 与 `src/Portal.jsx` 移除侧边栏「允许 AA 估算分数」「排除历史配置」与单榜「包含估算配置」「包含历史配置」控件及状态/文案。
+  - **保留不删**：`excludeStale`（「排除过期 / 失败缓存」）全链路、`shared/representatives.mjs` 与 `server/identity.mjs` 的 `!deprecated` 兜底排序、`src/HistoryDrawer.jsx` 对旧历史快照 `estimated`/`deprecated` 字段的中文字典翻译、被动只读证据标签。
+  - 文档与归档：修订 ADR-0002、ADR-0027、`openspec/specs/ranking/spec.md`、`openspec/specs/share-link/spec.md`，归档 `openspec/archive/2026-11-25-retire-dead-quality-switches/proposal.md`。
+- **验证**：`npm run test:coverage`（180/180，行 98.67 / 分支 91.10 / 函数 96.99）、`npm run lint`、`npm run lint:css`、`npm run format:check`、`npm run build`、`npm run test:e2e:fixture`（三套 E2E 全绿）全部通过；重启 `4317` 后五源全部 `success`。
+
+## 上一轮：多选 chip 搜索统一与「榜单覆盖」列重叠修复（2026-11-25 第三轮）
 
 - **需求与实现**：
   - 探索页帕累托搜索、模型全景表过滤、排行榜搜索与历史快照配置搜索统一替换为 `src/SearchChipInput.jsx`（AntD `Select mode="tags"` + 自由词条/候选点选 + 实时草稿预览 + 多 chip 按 OR 并集匹配）。纯逻辑抽进 `src/portal.mjs`（`splitSearchTerms`、`matchesSearchText`、`searchOptions` 等），帕累托搜索同步并入 `searchKey` 归一化，与排行榜保持同口径。
