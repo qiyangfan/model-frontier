@@ -160,6 +160,11 @@ test("AA inline failures fail clearly instead of returning invented data", async
   );
   // 没有 initialModels 标记
   assert.throws(() => aaInlineModels('"otherKey":[1]'), /找不到内联模型数据/);
+  // 标记后的值不是数组：必须就地报错，而不是 indexOf 向前吞掉后面的无关数组
+  assert.throws(
+    () => aaInlineModels('"initialModels":null,"other":[1,2]'),
+    /initialModels 的值不是数组/,
+  );
   // 数组被截断
   const flight = '"initialModels":' + JSON.stringify(filler(200));
   assert.throws(

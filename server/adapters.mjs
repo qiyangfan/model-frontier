@@ -129,7 +129,13 @@ export function aaInlineModels(flight) {
   const markAt = flight.indexOf(AA_MODELS_MARK);
   if (markAt < 0)
     throw new Error("AA 页面结构变化：找不到内联模型数据 initialModels");
-  const start = flight.indexOf("[", markAt + AA_MODELS_MARK.length);
+  // 值必须就地就是数组：跳过空白后第一个字符不是 [ 即结构变化。若用 indexOf 找
+  // 下一个 [，标记的值变成 null/对象时会向前吞掉无关数组，报错也指错方向。
+  let cursor = markAt + AA_MODELS_MARK.length;
+  while (cursor < flight.length && /\s/.test(flight[cursor])) cursor++;
+  if (flight[cursor] !== "[")
+    throw new Error("AA 页面结构变化：initialModels 的值不是数组");
+  const start = cursor;
   let depth = 0;
   let inStr = false;
   let esc = false;
