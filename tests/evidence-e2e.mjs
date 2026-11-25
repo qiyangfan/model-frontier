@@ -51,20 +51,17 @@ try {
   await history.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("tab", { name: "融合排行榜", exact: true }).click();
   await page.locator(".ranking-main-table tr[data-row-key]").first().waitFor();
-  await page.getByRole("switch", { name: "排除历史配置", exact: true }).check();
   await page
     .getByRole("switch", { name: "排除过期或失败缓存", exact: true })
     .check();
   await page.reload();
   // reload 后等 React 水合并从本地偏好恢复开关，再断言状态——立即 isChecked
   // 会读到恢复前的 false（竞态，实证约 1/3 概率触发）
-  await page.waitForFunction(() =>
-    ["排除历史配置", "排除过期或失败缓存"].every(
-      (name) =>
-        document
-          .querySelector(`[role="switch"][aria-label="${name}"]`)
-          ?.getAttribute("aria-checked") === "true",
-    ),
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="switch"][aria-label="排除过期或失败缓存"]')
+        ?.getAttribute("aria-checked") === "true",
   );
   // 所有故障和变化数据仅注入本测试浏览器，不写入实际快照或源缓存。
   const simulated = structuredClone(real);

@@ -88,11 +88,7 @@ function median(values) {
   const mid = Math.floor(a.length / 2);
   return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
 }
-export function combinedCostProfile(
-  models,
-  includeEstimated = false,
-  costSources = COST_SOURCES,
-) {
+export function combinedCostProfile(models, costSources = COST_SOURCES) {
   const eligible =
     costSources.length < 2
       ? []
@@ -100,9 +96,7 @@ export function combinedCostProfile(
           costSources.every((s) => {
             const r = m.representatives[s];
             return (
-              Number.isFinite(r?.costTask) &&
-              r.costTask > 0 &&
-              (includeEstimated || !r.estimated)
+              Number.isFinite(r?.costTask) && r.costTask > 0 && !r.estimated
             );
           }),
         );
@@ -119,12 +113,7 @@ export function combinedCostProfile(
     ),
   };
 }
-export function combinedCost(
-  model,
-  profile,
-  includeEstimated = false,
-  minSources = 3,
-) {
+export function combinedCost(model, profile, minSources = 3) {
   const components = COST_SOURCES.map((source) => {
     const r = model.representatives[source];
     const cost = r?.costTask;
@@ -138,10 +127,7 @@ export function combinedCost(
     };
   });
   const available = components.filter(
-    (c) =>
-      Number.isFinite(c.ratio) &&
-      c.ratio > 0 &&
-      (includeEstimated || !c.estimated),
+    (c) => Number.isFinite(c.ratio) && c.ratio > 0 && !c.estimated,
   );
   if (available.length < minSources)
     return { value: null, components, coverage: available.length };
@@ -156,19 +142,16 @@ export function combinedCost(
     coverage: available.length,
   };
 }
-// 每榜只比较该榜原始分；同榜同分平票，缺失或被排除估算不参与。
-export function majorityMatch(
-  left,
-  right,
-  { includeEstimated = false, sources = SCORE_SOURCES } = {},
-) {
+// 每榜只比较该榜原始分；同榜同分平票，缺失或估算条目不参与。
+export function majorityMatch(left, right, { sources = SCORE_SOURCES } = {}) {
   const ballots = sources.map((source) => {
     const a = left.representatives[source],
       b = right.representatives[source];
     const valid =
       Number.isFinite(a?.score) &&
       Number.isFinite(b?.score) &&
-      (includeEstimated || (!a.estimated && !b.estimated));
+      !a.estimated &&
+      !b.estimated;
     const difference = valid ? a.score - b.score : null;
     return { source, difference, vote: valid ? Math.sign(difference) : null };
   });
@@ -188,7 +171,7 @@ export function majorityMatch(
   };
 }
 
-function majorityRecords(models, includeEstimated, sources = SCORE_SOURCES) {
+function majorityRecords(models, sources = SCORE_SOURCES) {
   const records = new Map(
     models.map((m) => [
       m.id,
@@ -209,10 +192,7 @@ function majorityRecords(models, includeEstimated, sources = SCORE_SOURCES) {
   const contests = [];
   for (let i = 0; i < models.length; i++) {
     for (let j = i + 1; j < models.length; j++) {
-      const match = majorityMatch(models[i], models[j], {
-        includeEstimated,
-        sources,
-      });
+      const match = majorityMatch(models[i], models[j], { sources });
       const { result } = match;
       if (result === null) continue;
       const a = records.get(models[i].id),
@@ -340,43 +320,36 @@ export function analyze(
   models,
   {
     costSource = "composite",
-    includeEstimated = false,
     costMinSources = 2,
     costSources = COST_SOURCES,
     minOpponents = DEFAULT_MIN_OPPONENTS,
   } = {},
 ) {
-  const profile = combinedCostProfile(models, includeEstimated, costSources);
+  const profile = combinedCostProfile(models, costSources);
   const sources = SCORE_SOURCES;
   const required = 2;
   const eligible = models.filter(
     (m) =>
       sources.filter((s) => {
         const r = m.representatives[s];
-        return Number.isFinite(r?.score) && (includeEstimated || !r.estimated);
+        return Number.isFinite(r?.score) && !r.estimated;
       }).length >= required,
   );
-  const { records: matches, contests } = majorityRecords(
-    eligible,
-    includeEstimated,
-  );
+  const { records: matches, contests } = majorityRecords(eligible);
   const bt = fitBradleyTerry(contests);
   const pool = Object.fromEntries(
     sources.map((s) => [
       s,
       eligible
         .map((m) => m.representatives[s])
-        .filter(
-          (r) =>
-            Number.isFinite(r?.score) && (includeEstimated || !r.estimated),
-        )
+        .filter((r) => Number.isFinite(r?.score) && !r.estimated)
         .map((r) => r.score),
     ]),
   );
   const rows = models.map((m) => {
     const available = sources.filter((s) => {
       const r = m.representatives[s];
-      return Number.isFinite(r?.score) && (includeEstimated || !r.estimated);
+      return Number.isFinite(r?.score) && !r.estimated;
     });
     const covered = sources.length > 0 && available.length >= required;
     const record = matches.get(m.id) ?? null;
@@ -396,7 +369,7 @@ export function analyze(
       }
     }
     const costRecord = m.representatives[costSource];
-    const combined = combinedCost(m, profile, includeEstimated, costMinSources);
+    const combined = combinedCost(m, profile, costMinSources);
     const cost =
       costSource === "composite" ? combined.value : costRecord?.costTask;
     const reason = !covered
@@ -457,16 +430,12 @@ export function analyze(
     const cohort = eligible.filter((m) =>
       selectedSources.every((source) => {
         const score = m.representatives[source];
-        return (
-          Number.isFinite(score?.score) &&
-          (includeEstimated || !score.estimated)
-        );
+        return Number.isFinite(score?.score) && !score.estimated;
       }),
     );
     if (cohort.length < 2) continue;
     const { records, contests: cohortContests } = majorityRecords(
       cohort,
-      includeEstimated,
       selectedSources,
     );
     const cohortBt = fitBradleyTerry(cohortContests);
@@ -534,7 +503,6 @@ export function analyze(
     sources,
     required,
     requiredOpponents: minOpponents,
-    includeEstimated,
     cohort: eligible.length,
     coverageCohorts,
     plotted: plotted.length,

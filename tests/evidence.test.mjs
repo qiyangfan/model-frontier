@@ -81,18 +81,15 @@ test("unknown source release date does not make a fresh cache stale", () => {
 test("quality defaults preserve models and scoring exactly", () => {
   const models = [model({ aa: [row("Test")], vals: [row("Test")] })];
   assert.equal(applyEvidencePolicy(models, {}), models);
+  assert.equal(
+    applyEvidencePolicy(
+      models,
+      { aa: { stale: false } },
+      { excludeStale: true },
+    ),
+    models,
+  );
   assert.deepEqual(analyze(applyEvidencePolicy(models, {})), analyze(models));
-});
-test("historical exclusions reselect a valid variant and retain raw data without mutating it", () => {
-  const m = model({
-    aa: [row("Test (high)", 90, { deprecated: true }), row("Test (low)", 40)],
-    vals: [row("Test")],
-  });
-  const filtered = applyEvidencePolicy([m], {}, { excludeHistorical: true })[0];
-  assert.equal(filtered.representatives.aa.score, 40);
-  assert.equal(filtered.records.aa.length, 1);
-  assert.equal(filtered.originalRecords.aa.length, 2);
-  assert.equal(m.representatives.aa.score, 90);
 });
 test("failed source removal applies equally to ability and task costs; models remain discoverable", () => {
   const m = model({

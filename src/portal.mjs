@@ -138,11 +138,7 @@ export function vendorChipCounts(rows, chips = VENDOR_CHIPS) {
   }
   return chips.map((chip) => ({ ...chip, count: counts.get(chip.value) ?? 0 }));
 }
-export function nativeRanking(
-  models,
-  source,
-  { includeEstimated = false, includeHistorical = false } = {},
-) {
+export function nativeRanking(models, source) {
   const rows = models
     .flatMap((m) =>
       (m.records[source] ?? []).map((r, i) => ({
@@ -155,11 +151,7 @@ export function nativeRanking(
         configuration: r.configuration ?? r.name,
       })),
     )
-    .filter(
-      (r) =>
-        (includeEstimated || !r.estimated) &&
-        (includeHistorical || !r.deprecated),
-    );
+    .filter((r) => !r.estimated && !r.deprecated);
   rows.sort(
     (a, b) =>
       (Number.isFinite(b.score) ? b.score : -Infinity) -
@@ -221,14 +213,14 @@ export function livebenchSuiteKeys(models) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key]) => key);
 }
-export function coverageSummary(models, { includeEstimated = false } = {}) {
+export function coverageSummary(models) {
   const groups = Array(SOURCE_IDS.length + 1).fill(0);
   const counts = Object.fromEntries(SOURCE_IDS.map((s) => [s, 0]));
   for (const m of models) {
     let count = 0;
     for (const s of SOURCE_IDS) {
       const r = m.representatives[s];
-      if (Number.isFinite(r?.score) && (includeEstimated || !r.estimated)) {
+      if (Number.isFinite(r?.score) && !r.estimated) {
         counts[s]++;
         count++;
       }
@@ -243,7 +235,7 @@ export function coverageSummary(models, { includeEstimated = false } = {}) {
 // 因此先把各模型 opponentsBySharedSources 求和，再除以 2 还原真实场次。
 // 不能只汇总已排名模型：低样本模型未获名次，但它与上榜模型的比赛仍进入
 // BT 拟合，只计一侧会把场次算少。
-// 随“允许估算”等质量开关实时变化，供融合排行榜摘要使用。
+// 随质量排除开关实时变化，供融合排行榜摘要使用。
 export function evidenceDepth(rows, totalModels = rows.length) {
   const ranked = rows.filter((r) => Number.isFinite(r.composite));
   const rankedCount = ranked.length;

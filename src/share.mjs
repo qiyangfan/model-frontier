@@ -13,8 +13,6 @@ const MAX_TEXT = 120;
 // 默认值不写入链接，保持分享地址尽量短；带参数的链接是完整口径状态，缺省字段一律取默认值（与 reload 恢复语义一致）。
 // 无参数的地址不视为分享链接，由应用沿用本地偏好。
 const DEFAULTS = {
-  includeEstimated: false,
-  excludeHistorical: false,
   excludeStale: false,
   costSource: "composite",
   focus: "openFirst",
@@ -28,8 +26,6 @@ const DEFAULTS = {
   openness: "all",
   scoredOnly: false,
   coverageMaskId: "",
-  nativeEstimated: false,
-  nativeHistorical: false,
   budgetSource: "none",
   budgetLimit: null,
   selection: [],
@@ -45,12 +41,8 @@ function validCoverageMask(value) {
     : null;
 }
 const BOOL_KEYS = {
-  includeEstimated: "est",
-  excludeHistorical: "eh",
   excludeStale: "es",
   scoredOnly: "sf",
-  nativeEstimated: "ne",
-  nativeHistorical: "nh",
   onlyFront: "of",
 };
 const ENUM_KEYS = {

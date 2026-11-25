@@ -125,7 +125,7 @@ test("tied ballots and tied contests count half a match, never raw-score tiebrea
   assert.equal(majorityMatch(a, a).tied, 3);
 });
 
-test("missing scores and disallowed estimates never enter the formal cohort", () => {
+test("missing scores and estimates never enter the formal cohort", () => {
   const a = model("a", [3, 3, 3]),
     b = model("b", [2, 2, 2]),
     partial = model("partial", [100]);
@@ -142,14 +142,6 @@ test("missing scores and disallowed estimates never enter the formal cohort", ()
   }
   assert.equal(majorityMatch(a, partial).result, null);
   assert.equal(majorityMatch(a, estimate).result, null);
-  assert.equal(
-    majorityMatch(a, estimate, { includeEstimated: true }).result,
-    -1,
-  );
-  assert.equal(
-    run([a, b, partial, estimate], { includeEstimated: true }).cohort,
-    3,
-  );
   const withRecords = [a, b].map((m) => ({
     ...m,
     records: Object.fromEntries(

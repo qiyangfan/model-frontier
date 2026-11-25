@@ -211,12 +211,6 @@ function App() {
     [paretoVendors, setParetoVendors] = useState(
       () => shared.paretoVendors ?? [],
     ),
-    [estimated, setEstimated] = useState(
-      shared.includeEstimated ?? prefs.includeEstimated === true,
-    ),
-    [excludeHistorical, setExcludeHistorical] = useState(
-      shared.excludeHistorical ?? prefs.excludeHistorical === true,
-    ),
     [excludeStale, setExcludeStale] = useState(
       shared.excludeStale ?? prefs.excludeStale === true,
     ),
@@ -233,8 +227,6 @@ function App() {
       openness: shared.openness ?? "all",
       scoredOnly: shared.scoredOnly === true,
       coverageMaskId: shared.coverageMaskId ?? "",
-      nativeEstimates: false,
-      nativeHistorical: false,
       showSuites: false,
     })),
     [historyOpen, setHistoryOpen] = useState(false),
@@ -264,7 +256,7 @@ function App() {
   const chartRef = useRef(null);
   // 同文档打开分享链接（仅 hash 变化、页面不重载）时按链接恢复口径；无参数的页面导航不重置。
   // 口径字段与 reload 一致取「链接定义的完整状态」：缺省参数即默认值，而非本地偏好——保证同一链接在任何机器上复现同一结论；
-  // 不入链的本地开关（维度列、单榜估算/历史勾选等）与对比选择保留现值。
+  // 不入链的本地开关（维度列等）与对比选择保留现值。
   useEffect(() => {
     const handler = () => {
       setTab(pageFromHash());
@@ -274,8 +266,6 @@ function App() {
       }
       if (!location.hash.includes("?")) return;
       const { state } = decodeShareState(location.hash);
-      setEstimated(state.includeEstimated === true);
-      setExcludeHistorical(state.excludeHistorical === true);
       setExcludeStale(state.excludeStale === true);
       setCostSource(state.costSource ?? "composite");
       setFocus(state.focus ?? "openFirst");
@@ -288,7 +278,7 @@ function App() {
       setBudgetLimit(state.budgetLimit ?? null);
       // 对比选择与 reload 语义一致：链接显式带 sel 才覆盖，否则保留本机已存选择。
       if (state.selection) setSelection(state.selection);
-      // 排行榜筛选是入链口径：缺省即恢复默认视图，与 reload 一致；不入链的单榜开关保留现值。
+      // 排行榜筛选是入链口径：缺省即恢复默认视图，与 reload 一致；不入链的本地开关保留现值。
       setRanking((previous) => ({
         view: state.view ?? "fusion",
         search: emptySearch(state.rankingQuery),
@@ -296,8 +286,6 @@ function App() {
         openness: state.openness ?? "all",
         scoredOnly: state.scoredOnly === true,
         coverageMaskId: state.coverageMaskId ?? "",
-        nativeEstimates: previous.nativeEstimates,
-        nativeHistorical: previous.nativeHistorical,
         showSuites: previous.showSuites,
       }));
     };
@@ -415,34 +403,23 @@ function App() {
         focus,
         costSchemaVersion: 2,
         sourcePolicyVersion: 2,
-        includeEstimated: estimated,
-        excludeHistorical,
         excludeStale,
         budgetSource,
         budgetLimit,
       }),
     );
-  }, [
-    costSource,
-    focus,
-    estimated,
-    excludeHistorical,
-    excludeStale,
-    budgetSource,
-    budgetLimit,
-  ]);
+  }, [costSource, focus, excludeStale, budgetSource, budgetLimit]);
   const qualityStamp = Object.keys(NAMES)
     .map((s) => (sourceHealth(data?.sources?.[s]).excluded ? "1" : "0"))
     .join("");
   const evaluationModels = useMemo(
     () =>
       applyEvidencePolicy(data?.models ?? [], data?.sources ?? {}, {
-        excludeHistorical,
         excludeStale,
       }),
     // qualityStamp 是各源 excluded 状态的指纹，与函数体唯一读取的字段精确对应
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 以质量戳代替 sources 对象身份
-    [data?.models, excludeHistorical, excludeStale, qualityStamp],
+    [data?.models, excludeStale, qualityStamp],
   );
   const activeCostSources = useMemo(
     () =>
@@ -456,10 +433,9 @@ function App() {
     () =>
       analyze(evaluationModels, {
         costSource,
-        includeEstimated: estimated,
         costSources: activeCostSources,
       }),
-    [evaluationModels, costSource, estimated, activeCostSources],
+    [evaluationModels, costSource, activeCostSources],
   );
   // 国产子集前沿：约束型 lens——被国外模型支配、但在「只考虑国产」约束下仍不被国产
   // 模型支配的模型（如 MiMo V2.6 系）。展示层派生（与 openFrontier 的 analyze 字段不同层：
@@ -557,9 +533,7 @@ function App() {
     const parts = [
       `五榜多数对决 Bradley-Terry（主榜至少 ${analysis.requiredOpponents} 个有效对手，位次均值仅同分排序）`,
       `至少 ${analysis.required} 榜`,
-      estimated ? "允许 AA 估算" : "排除 AA 估算",
     ];
-    if (excludeHistorical) parts.push("排除历史配置");
     if (excludeStale) parts.push("排除过期 / 失败缓存");
     parts.push(`成本口径：${COSTS[costSource]}`);
     if (budgetSource !== "none" && Number.isFinite(budgetLimit))
@@ -568,8 +542,6 @@ function App() {
   }, [
     analysis.required,
     analysis.requiredOpponents,
-    estimated,
-    excludeHistorical,
     excludeStale,
     costSource,
     budgetSource,
@@ -592,8 +564,6 @@ function App() {
   // 搜索输入做 250ms 去抖，避免 replaceState 限流导致地址落后。
   const shareTarget = () =>
     shareHash(tab, {
-      includeEstimated: estimated,
-      excludeHistorical,
       excludeStale,
       costSource,
       focus,
@@ -627,8 +597,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shareTarget 每次渲染重建，上方已逐一枚举其全部输入
   }, [
     tab,
-    estimated,
-    excludeHistorical,
     excludeStale,
     costSource,
     focus,
@@ -663,12 +631,11 @@ function App() {
           ? current
           : analyze(evaluationModels, {
               costSource: source,
-              includeEstimated: estimated,
               costSources: activeCostSources,
             }).rows.find((r) => r.id === current.id),
       ]),
     );
-  }, [current, costSource, evaluationModels, estimated, activeCostSources]);
+  }, [current, costSource, evaluationModels, activeCostSources]);
   const stale = Object.values(data?.sources ?? {}).filter((s) => s.stale);
   const refresh = async () => {
     setBusy(true);
@@ -941,25 +908,7 @@ function App() {
       <p className="control-help text-[10px] leading-[1.85] text-[#8a9aa4] mt-0 mb-[17px] max-760:col-span-full max-760:mt-[2px] max-760:mb-[10px] max-760:text-[9px]">
         按所选来源的真实美元任务成本隐藏超出预算的模型；未披露或不可核对该来源成本的模型一并隐藏。只改变显示，不改变分数与名次；综合相对成本不是美元预算。
       </p>
-      <div className="flex items-center justify-between gap-[8px] text-[10px] text-[#718794] my-[17px] max-760:col-span-full max-760:my-[8px]">
-        <span>允许 AA 估算分数</span>
-        <Switch
-          size="small"
-          checked={estimated}
-          onChange={setEstimated}
-          aria-label="允许 AA 估算分数"
-        />
-      </div>
       <div className="h-[1px] bg-[#e9eef2] mt-[17px] mb-[20px] max-760:my-[6px] max-760:col-span-full" />
-      <div className="flex items-center justify-between gap-[8px] text-[10px] text-[#718794] my-[17px] max-760:col-span-full max-760:my-[8px]">
-        <span>排除历史配置</span>
-        <Switch
-          aria-label="排除历史配置"
-          size="small"
-          checked={excludeHistorical}
-          onChange={setExcludeHistorical}
-        />
-      </div>
       <div className="flex items-center justify-between gap-[8px] text-[10px] text-[#718794] my-[17px] max-760:col-span-full max-760:my-[8px]">
         <span>排除过期 / 失败缓存</span>
         <Switch
@@ -1165,7 +1114,7 @@ function App() {
                 Object.keys(NAMES).every(
                   (key) =>
                     Number.isFinite(m.representatives[key]?.score) &&
-                    (!m.representatives[key]?.estimated || estimated),
+                    !m.representatives[key]?.estimated,
                 ),
               ).length ?? 0}
               <em className="text-[11px] not-italic tracking-normal font-normal text-[#9aa7af] ml-[9px] max-760:text-[9px]">
@@ -1213,9 +1162,7 @@ function App() {
           <span className="flex items-center gap-[8px] flex-wrap">
             <SettingOutlined aria-hidden="true" /> PK 主积分 · BT / Elo ·
             五榜各一票 · 至少 {analysis.required} 榜 · 至少{" "}
-            {analysis.requiredOpponents} 个有效对手 ·{" "}
-            {estimated ? "允许估算" : "排除估算"}
-            {excludeHistorical ? " · 排除历史" : ""}
+            {analysis.requiredOpponents} 个有效对手
             {excludeStale ? " · 排除过期缓存" : ""}
           </span>
           <Button type="link" size="small" onClick={() => navigate("rankings")}>
@@ -1251,7 +1198,6 @@ function App() {
             onNavigate={navigate}
             onSelect={setSelected}
             onQuickCompare={quickCompare}
-            includeEstimated={estimated}
             onOpenHistory={openHistory}
           />
         )}
@@ -1268,7 +1214,6 @@ function App() {
             onExport={(content, name) =>
               download(content, "text/csv;charset=utf-8", name)
             }
-            includeEstimated={estimated}
             ranking={ranking}
             onRanking={(patch) =>
               setRanking((previous) => ({ ...previous, ...patch }))
@@ -1951,7 +1896,7 @@ function App() {
             主积分相同才按已有榜单排名百分位的等权平均排序；位次均值只作同分排序，不作为第五票，也不与主分再次合并。不足两榜的模型仍展示原始分，但不参加正式排名或前沿。对手集合可能不同，等级分的可比性弱于完整五榜样本；对比页展示共同榜数、票数、原始分与分差。位次均值不参与帕累托纵轴或支配判断。
           </p>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            帕累托搜索只标注图中命中点并保留全部点位；厂商、文本和前沿条件只过滤下方模型表；预算只改变显示，成本切换不改变积分。估算及质量排除开关会改变参赛样本，因此会重算积分。
+            帕累托搜索只标注图中命中点并保留全部点位；厂商、文本和前沿条件只过滤下方模型表；预算只改变显示，成本切换不改变积分。过期或失败缓存排除开关会改变参赛样本，因此会重算积分。
           </p>
           <h3 className="text-[15px] text-[#3d5a68] mt-[24px]">
             为何更关注开放权重？
@@ -1961,7 +1906,7 @@ function App() {
           </p>
           <h3 className="text-[15px] text-[#3d5a68] mt-[24px]">成本与前沿</h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            默认使用综合相对成本指数：以三站都有正任务成本、且估算设置允许的固定模型样本为成本基准，各站成本除以该站中位数，再取三源等权几何平均并乘
+            默认使用综合相对成本指数：以三站都有正任务成本的实测模型样本为成本基准，各站成本除以该站中位数，再取三源等权几何平均并乘
             100。三源权重各
             1/3，与能力权重独立；页面以基准的多少倍展示（原指数除以
             100），无美元单位，不能作为生产账单预算。成本至少两源才计算；缺失不补值，对已有来源等权平均对数比值，并标记

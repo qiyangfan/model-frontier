@@ -202,7 +202,7 @@ test("multi-chip search helpers split, encode, match, and build deduplicated opt
   assert.equal(opts[1].label, "Alpha");
   assert.equal(opts[2].label, "厂商 · Zeta");
 });
-test("single source ranking keeps full configurations and no cost requirement; estimates and history opt in", () => {
+test("single source ranking keeps active configurations and no cost requirement, excluding estimates and history", () => {
   const models = [
     model(
       "family",
@@ -225,17 +225,6 @@ test("single source ranking keeps full configurations and no cost requirement; e
   assert.equal(rows[1].rank, 2);
   assert.equal(rows[1].costTask, null);
   assert.equal(rows[0].modelId, "family");
-  assert.equal(
-    nativeRanking(models, "aa", { includeEstimated: true }).length,
-    3,
-  );
-  assert.equal(
-    nativeRanking(models, "aa", {
-      includeEstimated: true,
-      includeHistorical: true,
-    }).length,
-    4,
-  );
 });
 test("native ranking gives ties the same position and no position for missing total score", () => {
   const rows = nativeRanking(
@@ -260,7 +249,7 @@ test("comparison selection rejects stale ids, duplicates and more than four choi
   );
   assert.deepEqual(sanitizeSelection({}, models), []);
 });
-test("coverage counts four-source evidence, excluding estimates unless requested", () => {
+test("coverage counts evidence across active sources and excludes estimated scores", () => {
   const models = [
     model("a", {
       aa: { score: 1 },
@@ -277,10 +266,6 @@ test("coverage counts four-source evidence, excluding estimates unless requested
     counts: { aa: 1, vals: 2, livebench: 1, arena: 0, modeldial: 0 },
     groups: buckets({ 0: 1, 1: 1, 3: 1 }),
   });
-  assert.deepEqual(
-    coverageSummary(models, { includeEstimated: true }).groups,
-    buckets({ 1: 2, 3: 1 }),
-  );
 });
 test("coverage counts Arena scores into the distribution and never lets them raise task-cost coverage", () => {
   const models = [

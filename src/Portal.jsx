@@ -219,7 +219,6 @@ export function Overview({
   onNavigate,
   onSelect,
   onQuickCompare,
-  includeEstimated,
   onOpenHistory,
 }) {
   const ranked = useMemo(
@@ -227,10 +226,7 @@ export function Overview({
     [analysis.rows],
   );
   const open = rankedModels(ranked.filter((r) => r.openWeights === true));
-  const coverage = useMemo(
-    () => coverageSummary(models, { includeEstimated }),
-    [models, includeEstimated],
-  );
+  const coverage = useMemo(() => coverageSummary(models), [models]);
   const verdict = useMemo(() => {
     const scored = adjustedScores(analysis.rows);
     return {
@@ -691,13 +687,11 @@ export function Rankings({
     openness,
     scoredOnly,
     coverageMaskId,
-    nativeEstimates,
-    nativeHistorical,
     showSuites,
   } = ranking;
   const searchTerms = useMemo(() => searchTermsOf(search), [search]);
   const ranked = useMemo(() => rankedModels(analysis.rows), [analysis.rows]);
-  // 证据深度：融合榜两两证据有多厚。纯展示衍生，随“允许估算”等质量开关实时变化，不参与任何评分。
+  // 证据深度：融合榜两两证据有多厚。纯展示衍生，随质量排除开关实时变化，不参与任何评分。
   const depth = useMemo(
     () => evidenceDepth(analysis.rows, models.length),
     [analysis.rows, models.length],
@@ -744,14 +738,8 @@ export function Rankings({
     });
   }, [ranked, coverageRanked, searchTerms, creators, openness, scoredOnly]);
   const native = useMemo(
-    () =>
-      view === "fusion"
-        ? []
-        : nativeRanking(models, view, {
-            includeEstimated: nativeEstimates,
-            includeHistorical: nativeHistorical,
-          }),
-    [models, view, nativeEstimates, nativeHistorical],
+    () => (view === "fusion" ? [] : nativeRanking(models, view)),
+    [models, view],
   );
   const pool = view === "fusion" ? ranked : native;
   const rankingSearchOptions = useMemo(() => searchOptions(pool), [pool]);
@@ -1138,7 +1126,7 @@ export function Rankings({
                   {Math.round(depth.richBoardPct)}%
                 </span>
                 {
-                  " 达 3 榜以上。切换「允许估算」会同时改变样本与单场票数；名次请结合战绩与实际对手数阅读。"
+                  " 达 3 榜以上。切换「排除过期 / 失败缓存」会同时改变样本与单场票数；名次请结合战绩与实际对手数阅读。"
                 }
               </>
             )}
@@ -1195,7 +1183,7 @@ export function Rankings({
                 .sort()
                 .map((value) => ({ value, label: value }))}
             />
-            {view === "fusion" ? (
+            {view === "fusion" && (
               <>
                 <Checkbox
                   checked={scoredOnly}
@@ -1208,25 +1196,6 @@ export function Rankings({
                   onChange={(e) => onRanking({ showSuites: e.target.checked })}
                 >
                   LiveBench 能力维度
-                </Checkbox>
-              </>
-            ) : (
-              <>
-                <Checkbox
-                  checked={nativeEstimates}
-                  onChange={(e) =>
-                    onRanking({ nativeEstimates: e.target.checked })
-                  }
-                >
-                  包含估算配置
-                </Checkbox>
-                <Checkbox
-                  checked={nativeHistorical}
-                  onChange={(e) =>
-                    onRanking({ nativeHistorical: e.target.checked })
-                  }
-                >
-                  包含历史配置
                 </Checkbox>
               </>
             )}
@@ -1418,9 +1387,7 @@ export function Comparison({
       id: `${left.id}:${right.id}`,
       left,
       right,
-      ...majorityMatch(left, right, {
-        includeEstimated: analysis.includeEstimated,
-      }),
+      ...majorityMatch(left, right),
     })),
   );
   const columns = [

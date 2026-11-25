@@ -1,5 +1,4 @@
 import { NAMES } from "./presentation.mjs";
-import { selectRepresentative } from "../shared/representatives.mjs";
 export const CACHE_MAX_AGE_HOURS = 24;
 export function sourceHealth(source, now = Date.now()) {
   const timestamp = Date.parse(source?.fetchedAt ?? "");
@@ -14,20 +13,22 @@ export function sourceHealth(source, now = Date.now()) {
   };
 }
 export function applyEvidencePolicy(models, sources = {}, policy = {}) {
-  if (!policy.excludeHistorical && !policy.excludeStale) return models;
+  if (!policy.excludeStale) return models;
+  const excluded = new Set(
+    Object.keys(sources).filter(
+      (s) => sourceHealth(sources[s], policy.now).excluded,
+    ),
+  );
+  if (!excluded.size) return models;
   return models.map((m) => {
     const records = Object.fromEntries(
       Object.entries(m.records).map(([s, rows]) => [
         s,
-        policy.excludeStale && sourceHealth(sources[s], policy.now).excluded
-          ? []
-          : rows.filter((r) => !policy.excludeHistorical || !r.deprecated),
+        excluded.has(s) ? [] : rows,
       ]),
     );
     const representatives = Object.fromEntries(
-      Object.entries(records)
-        .filter(([, rows]) => rows.length)
-        .map(([s, rows]) => [s, selectRepresentative(rows)]),
+      Object.entries(m.representatives).filter(([s]) => !excluded.has(s)),
     );
     return {
       ...m,

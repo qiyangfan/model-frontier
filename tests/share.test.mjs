@@ -7,8 +7,6 @@ import {
 } from "../src/share.mjs";
 test("full share state survives an encode/decode round trip", () => {
   const state = {
-    includeEstimated: true,
-    excludeHistorical: true,
     excludeStale: true,
     costSource: "vals",
     focus: "openOnly",
@@ -20,8 +18,6 @@ test("full share state survives an encode/decode round trip", () => {
     openness: "open",
     scoredOnly: true,
     coverageMaskId: "aa+vals",
-    nativeEstimated: true,
-    nativeHistorical: true,
     budgetSource: "aa",
     budgetLimit: 1.5,
     selection: ["a", "b"],
@@ -149,10 +145,11 @@ test("multi-vendor state: cr pipe joins stay intact, pv chip set round trips", (
   );
 });
 
-test("retired formula and weight parameters no longer select any scoring path", () => {
+test("retired formula, weight, estimate and historical parameters are safely ignored", () => {
   assert.deepEqual(
-    decodeShareState("#rankings?score=majority&p=custom&w=80-10-10&ms=3&q=glm")
-      .state,
+    decodeShareState(
+      "#rankings?score=majority&p=custom&w=80-10-10&ms=3&est=1&eh=1&ne=1&nh=1&q=glm",
+    ).state,
     { query: "glm" },
   );
   assert.equal(
@@ -161,6 +158,10 @@ test("retired formula and weight parameters no longer select any scoring path", 
       preset: "custom",
       weights: { aa: 80, vals: 10, livebench: 10 },
       minSources: 3,
+      includeEstimated: true,
+      excludeHistorical: true,
+      nativeEstimated: true,
+      nativeHistorical: true,
     }),
     "",
   );

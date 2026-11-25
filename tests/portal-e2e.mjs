@@ -200,7 +200,18 @@ try {
   );
   await tab("融合排行榜");
   await source("Artificial Analysis");
-  await page.getByText("包含历史配置", { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("checkbox", { name: "包含历史配置", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page
+      .getByRole("checkbox", { name: "包含估算配置", exact: true })
+      .count(),
+    0,
+  );
   const nativeDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出当前榜单", exact: true }).click();
   const native = await nativeDownload;
@@ -208,12 +219,6 @@ try {
   const nativeText = await readFile(await native.path(), "utf8");
   assert.ok(nativeText.includes("原始总分"));
   assert.ok(!nativeText.includes("综合分"));
-  await page
-    .getByRole("checkbox", { name: "包含历史配置", exact: true })
-    .check();
-  await page
-    .getByRole("checkbox", { name: "包含估算配置", exact: true })
-    .check();
   // 从当前排行榜行动态提取两个不同厂商名，验证实时预览、多选 chip OR 并集与一键清空
   const [firstTerm, secondTerm] = await page.evaluate(() => {
     const creators = [
@@ -644,18 +649,20 @@ try {
   await page
     .context()
     .grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
-  await page.getByRole("switch", { name: "排除历史配置", exact: true }).check();
+  await page
+    .getByRole("switch", { name: "排除过期或失败缓存", exact: true })
+    .check();
   await page.getByRole("button", { name: "复制分享链接", exact: true }).click();
   await page.getByRole("button", { name: "已复制链接", exact: true }).waitFor();
   const shareLink = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(
     shareLink.includes("#rankings?") &&
-      shareLink.includes("eh=1") &&
+      shareLink.includes("es=1") &&
       shareLink.includes("sel="),
     "分享链接缺少口径参数：" + shareLink,
   );
   await page
-    .getByRole("switch", { name: "排除历史配置", exact: true })
+    .getByRole("switch", { name: "排除过期或失败缓存", exact: true })
     .uncheck();
   await page.goto(base + "/#rankings?p=equal&ms=3");
   await page.reload();
@@ -809,8 +816,6 @@ try {
         JSON.stringify({
           costSchemaVersion: 2,
           costSource: "aa",
-          includeEstimated: true,
-          excludeHistorical: true,
           excludeStale: true,
         }),
       ),
@@ -823,17 +828,22 @@ try {
         exact: true,
       })
       .waitFor();
-    for (const name of [
-      "允许 AA 估算分数",
-      "排除历史配置",
-      "排除过期或失败缓存",
-    ]) {
+    for (const retired of ["允许 AA 估算分数", "排除历史配置"]) {
       assert.equal(
-        await receiver.getByRole("switch", { name, exact: true }).isChecked(),
-        false,
-        "默认分享不应继承接收方偏好：" + name,
+        await receiver
+          .getByRole("switch", { name: retired, exact: true })
+          .count(),
+        0,
+        "已退役空转开关不应再渲染：" + retired,
       );
     }
+    assert.equal(
+      await receiver
+        .getByRole("switch", { name: "排除过期或失败缓存", exact: true })
+        .isChecked(),
+      false,
+      "默认分享不应继承接收方偏好：排除过期或失败缓存",
+    );
   } finally {
     await receiver.close();
   }
