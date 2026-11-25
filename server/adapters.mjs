@@ -3,28 +3,34 @@ import { licenseState } from "./identity.mjs";
 import * as cheerio from "cheerio";
 import { parse } from "csv-parse/sync";
 import { gunzipSync } from "node:zlib";
+import { SOURCE_NAMES } from "../shared/sources.mjs";
+// 展示名从 shared/sources.mjs 派生，只有 url 与口径说明按源各写一份。
 export const SOURCE_INFO = {
   arena: {
-    name: "Arena",
     url: "https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset",
     metric: "Text Overall · 人类盲测偏好",
   },
   aa: {
-    name: "Artificial Analysis",
     url: "https://artificialanalysis.ai/leaderboards/models",
     metric: "Intelligence Index · 任务能力",
   },
   vals: {
-    name: "Vals",
     url: "https://www.vals.ai/benchmarks/vals_index",
     metric: "Vals Index · 经济任务",
   },
   livebench: {
-    name: "LiveBench",
     url: "https://livebench.ai/",
     metric: "分类等权均分",
   },
+  modeldial: {
+    url: "https://modeldial.com/en/leaderboard/coding",
+    metric: "Coding Overall · 工程能力",
+  },
 };
+// 兜底与 src/presentation.mjs 对齐：新增来源漏配 SOURCE_NAMES 时退回 id，
+// 不至于让前端卡片标题变成空白。
+for (const [source, info] of Object.entries(SOURCE_INFO))
+  info.name = SOURCE_NAMES[source] ?? source;
 const number = (s) => {
   const m = String(s ?? "")
     .replaceAll(",", "")
@@ -734,6 +740,85 @@ export function parseArena(data) {
     ],
   };
 }
+// ModelDial 的 Coding 榜是站点唯一的客户端渲染榜单，数据全在 /data/overview.json。
+// 该文件是「一个快照、多种 route 与推理档位」的扁平列表，站点默认排名按下面
+// 三条规则收敛到「一模型一行」：
+//   1. hiddenModelIds 同时匹配 model_id 与 candidate_id（它两种都混着放），排除未发布模型；
+//   2. product_kind === "bot" 排除外部产品评测（grok-bot、dot 两条，评测对象是产品不是模型）；
+//   3. listing_replaces 指向的那条是旧配置（被本条顶掉），剔旧的、留新的。
+// 剩下的按 model_id 分组，每组取总分最高的那条，等价于站点
+// "Each model defaults to its highest-scoring complete configuration"。
+const MODELDIAL_DATA_URL = "https://modeldial.com/data/overview.json";
+export function parseModelDial(doc) {
+  const snapshot = doc?.snapshot?.entries;
+  if (!Array.isArray(snapshot))
+    throw new Error("ModelDial 数据格式变化：快照条目不是数组");
+  const weights = doc?.qualityScores?.weights;
+  if (!weights || !Object.keys(weights).length)
+    throw new Error("ModelDial 数据格式变化：缺少五轴权重");
+  const axes = Object.keys(weights);
+  const total = axes.reduce((sum, axis) => sum + Number(weights[axis]), 0);
+  if (!Number.isFinite(total) || total <= 0)
+    throw new Error("ModelDial 数据格式变化：五轴权重不是正数");
+  const hidden = new Set(doc.hiddenModelIds ?? []);
+  const names = doc.displayNames ?? {};
+  // listing_replaces 指「本条顶掉的那条旧 route」，要剔的是被顶掉的，不是声明的这条。
+  const replaced = new Set(
+    snapshot
+      .filter((entry) => typeof entry?.listing_replaces === "string")
+      .map((entry) => entry.listing_replaces),
+  );
+  const best = new Map();
+  for (const entry of snapshot) {
+    if (!entry || typeof entry !== "object") continue;
+    if (hidden.has(entry.model_id) || hidden.has(entry.candidate_id)) continue;
+    if (entry.product_kind === "bot") continue;
+    if (replaced.has(entry.candidate_id)) continue;
+    // 轴分必须是数字：null/缺失会让 Number() 变 0，等于凭空造一个满分偏低的假条目。
+    const scores = axes.map((axis) => entry[`${axis}_score`]);
+    if (
+      scores.some(
+        (score) => typeof score !== "number" || !Number.isFinite(score),
+      )
+    )
+      continue;
+    // 按站点声明的权重自算总分：与站点展示的 overall_score 的偏差中位 0.003 分，
+    // 个别条目最大 0.29 分（站点把四舍五入写进了 published_at 那次快照）。
+    const overall =
+      scores.reduce(
+        (sum, score, i) => sum + score * Number(weights[axes[i]]),
+        0,
+      ) / total;
+    const id = String(entry.model_id ?? "");
+    if (!id) continue;
+    const current = best.get(id);
+    if (current && overall <= current.score) continue;
+    best.set(id, {
+      name: names[id] ?? id,
+      score: overall,
+      // reasoning_effort 缺失时退回 default；站方自己的 unknown 档位原样保留，不替它猜。
+      configuration: entry.reasoning_effort ?? "default",
+      url: SOURCE_INFO.modeldial.url,
+      source: "modeldial",
+    });
+  }
+  const rows = [...best.values()];
+  if (!rows.length) throw new Error("ModelDial 数据格式变化：没有可排名条目");
+  return {
+    rows,
+    sourceDate: String(doc?.snapshot?.published_at ?? "").slice(0, 10),
+    releaseKey: String(doc?.snapshot?.batch_id ?? ""),
+  };
+}
+export async function fetchModelDial() {
+  const doc = await requestSource(
+    MODELDIAL_DATA_URL,
+    SOURCE_TIMEOUT,
+    "*/*",
+    (r) => r.json(),
+  );
+  return parseModelDial(doc);
+}
 export async function fetchArena() {
   // hyparquet 内部对 file 做 new DataView()，必须传真 ArrayBuffer；getBuffer 返回的
   // Node Buffer 会抛 "First argument to DataView constructor must be an ArrayBuffer"。
@@ -751,4 +836,5 @@ export const FETCHERS = {
   aa: fetchAA,
   vals: fetchVals,
   livebench: fetchLivebench,
+  modeldial: fetchModelDial,
 };

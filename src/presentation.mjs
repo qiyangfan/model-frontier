@@ -1,9 +1,8 @@
-export const NAMES = {
-  aa: "Artificial Analysis",
-  vals: "Vals",
-  livebench: "LiveBench",
-  arena: "Arena",
-};
+import { SCORE_SOURCES, SOURCE_NAMES } from "../shared/sources.mjs";
+// 展示名跟着评分来源清单派生：加一票只需改 shared/sources.mjs 一处。
+export const NAMES = Object.fromEntries(
+  SCORE_SOURCES.map((source) => [source, SOURCE_NAMES[source] ?? source]),
+);
 export const COSTS = {
   composite: "综合相对成本（基准 1 倍）",
   aa: "AA 每次任务成本",

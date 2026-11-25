@@ -1,6 +1,29 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
+// 按引号规则切一行 CSV：配置标签里可能含逗号（如「Name (Max, Default)」），
+// 直接 split(",") 会把一个字段算成两个，得出假的错位结论。
+const csvFields = (line) => {
+  const out = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+};
 const base = process.env.FRONTIER_URL ?? "http://localhost:4317";
 const browser = await chromium.launch({
   channel: process.env.BROWSER_CHANNEL || "chrome",
@@ -149,6 +172,7 @@ try {
     "aa",
     "arena",
     "livebench",
+    "modeldial",
     "vals",
   ]);
   // Arena 已回归第四评分来源：必须有真实数据进入模型族，且披露票数证据
@@ -295,18 +319,30 @@ try {
   const csv = await readFile(await download.path(), "utf8");
   assert.ok(csv.includes("MiMo"));
   assert.ok(csv.includes("开放权重前沿"));
+  // 表头与每行列数必须一致：曾出现表头写死四源、数据行按来源清单派生的错位缺陷，
+  // 「Arena投票数」列里装的其实是 ModelDial 的分数。
+  const csvLines = csv.split("\r\n").filter(Boolean);
+  const columnCount = csvFields(csvLines[0].replace(/^\ufeff/, "")).length;
+  for (const line of csvLines)
+    assert.equal(csvFields(line).length, columnCount, "CSV 存在错位列");
   await choose("成本来源", "Vals 每次测试成本");
   assert.equal(
     await page.getByRole("tab", { name: "成本敏感性", exact: true }).count(),
     0,
   );
   await page.getByRole("tab", { name: "数据来源与刷新", exact: true }).click();
-  assert.equal(await page.locator(".source-card").count(), 4);
+  // 来源卡片数跟着 SCORE_SOURCES 走，加票时这里自动变成 5，不必回来改数字
+  assert.equal(await page.locator(".source-card").count(), 5);
   await page.getByText("703 条源站模型配置", { exact: false }).count();
   await page
     .locator(".source-card")
     .filter({ hasText: "Arena" })
     .getByText("Text Overall · 人类盲测偏好", { exact: true })
+    .waitFor();
+  await page
+    .locator(".source-card")
+    .filter({ hasText: "ModelDial" })
+    .getByText("Coding Overall · 工程能力", { exact: true })
     .waitFor();
   const response = await page.request.put(base + "/api/settings", {
     data: { refreshHours: 7 },

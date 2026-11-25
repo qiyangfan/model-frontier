@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyze } from "../src/analysis.mjs";
 import { colorFor, FALLBACK_COLORS } from "../src/presentation.mjs";
+import { SCORE_SOURCES } from "../shared/sources.mjs";
 import {
   VENDOR_CHIPS,
   compareNullableScores,
@@ -226,13 +227,16 @@ test("coverage counts four-source evidence, excluding estimates unless requested
     model("b", { aa: { score: 4, estimated: true } }),
     model("c", { vals: { score: 2 } }),
   ];
+  // 分组数组长度 = 来源数 + 1（0 榜那一档也在里面），按来源清单推导，加票不必回来改
+  const buckets = (counts) =>
+    Array.from({ length: SCORE_SOURCES.length + 1 }, (_, i) => counts[i] ?? 0);
   assert.deepEqual(coverageSummary(models), {
-    counts: { aa: 1, vals: 2, livebench: 1, arena: 0 },
-    groups: [1, 1, 0, 1, 0],
+    counts: { aa: 1, vals: 2, livebench: 1, arena: 0, modeldial: 0 },
+    groups: buckets({ 0: 1, 1: 1, 3: 1 }),
   });
   assert.deepEqual(
     coverageSummary(models, { includeEstimated: true }).groups,
-    [0, 2, 0, 1, 0],
+    buckets({ 1: 2, 3: 1 }),
   );
 });
 test("coverage counts Arena scores into the distribution and never lets them raise task-cost coverage", () => {
@@ -247,8 +251,13 @@ test("coverage counts Arena scores into the distribution and never lets them rai
   ];
   const summary = coverageSummary(models);
   assert.equal(summary.counts.arena, 2);
-  // a 有四榜有效分进最高档；b 只有 Arena 一榜，Arena 不提供成本也不能抬高档位统计。
-  assert.deepEqual(summary.groups, [0, 1, 0, 0, 1]);
+  // a 有五榜有效分进最高档；b 只有 Arena 一榜，Arena 不提供成本也不能抬高档位统计。
+  assert.deepEqual(
+    summary.groups,
+    Array.from({ length: SCORE_SOURCES.length + 1 }, (_, i) =>
+      i === 1 || i === 4 ? 1 : 0,
+    ),
+  );
 });
 test("native CSV exports raw score and cost with spreadsheet injection protection", () => {
   const csv = nativeCsvExport([

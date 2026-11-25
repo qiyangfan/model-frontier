@@ -64,12 +64,20 @@ import {
 } from "./Evidence.jsx";
 import { sourceHealth } from "./evidence.mjs";
 const number = (v) => (Number.isFinite(v) ? v.toFixed(1) : "未披露");
-// 四来源徽标配色（原 .source-aa/.source-vals/.source-livebench，键与 SOURCE_IDS 对应）
+// 五来源徽标配色与缩写（原 .source-aa/.source-vals/.source-livebench，键与 SOURCE_IDS 对应）
 const SOURCE_TONE = {
   aa: "bg-[#e7eef9] text-[#416795]",
   vals: "bg-[#eeeaf7] text-[#7e60a7]",
   livebench: "bg-[#e5f3ef] text-[#137964]",
   arena: "bg-[#f2eafa] text-[#76559a]",
+  modeldial: "bg-[#fbf0e4] text-[#9a5c1d]",
+};
+const SOURCE_SYMBOL = {
+  aa: "AA",
+  vals: "V",
+  livebench: "LB",
+  arena: "AR",
+  modeldial: "MD",
 };
 const stateTag = (r) => (
   <Tag color={r.openWeights === true ? "green" : "default"}>
@@ -336,13 +344,13 @@ export function Overview({
       <section className="portal-hero">
         <div>
           <div className="text-[9px] font-[650] tracking-[0.16em] text-[#668c86] max-760:text-[8px]">
-            FOUR SOURCES. ONE WORKSPACE.
+            FIVE SOURCES. ONE WORKSPACE.
           </div>
           <h2 className="mt-[14px] mb-[10px] text-[28px] font-semibold leading-[1.45] tracking-[-0.04em] text-[#203e3b] max-1180:text-[25px] max-760:text-[24px]">
             从榜单，到你的模型选择
           </h2>
           <p className="m-0 max-w-[600px] text-[13px] leading-[1.95] text-[#5f7c77] max-760:text-[12px]">
-            先看能力排名，再核对任务表现、价格与配置。四个来源的证据并排呈现，每一个综合结论都能回到原始数据。
+            先看能力排名，再核对任务表现、价格与配置。五个来源的证据并排呈现，每一个综合结论都能回到原始数据。
           </p>
           <div className="hero-actions">
             <Button
@@ -362,13 +370,13 @@ export function Overview({
           </div>
         </div>
         <div className="hero-source-stack">
-          {SOURCE_IDS.map((s, i) => (
+          {SOURCE_IDS.map((s) => (
             <div
               key={s}
               className="flex items-center gap-[12px] rounded-[9px] border border-[#e1ebe7] bg-[#ffffffc9] px-[16px] py-[13px] max-760:p-[12px]"
             >
               <span className={"source-symbol " + (SOURCE_TONE[s] ?? "")}>
-                {["AA", "V", "LB", "AR"][i]}
+                {SOURCE_SYMBOL[s] ?? s.slice(0, 2).toUpperCase()}
               </span>
               <div className="flex-1">
                 <b className="block text-[12px] font-semibold">{NAMES[s]}</b>
@@ -926,14 +934,17 @@ export function Rankings({
                           <div>
                             对局覆盖按双方都存在有效分的评分榜数量统计：
                           </div>
-                          {[2, 3, 4].map((count) => (
-                            <div key={count}>
-                              双方共有 {count} 个有效评分榜：
-                              {row.record.opponentsBySharedSources?.[count] ??
-                                0}
-                              场
-                            </div>
-                          ))}
+                          {Object.keys(row.record.opponentsBySharedSources)
+                            .map(Number)
+                            .sort((a, b) => a - b)
+                            .map((count) => (
+                              <div key={count}>
+                                双方共有 {count} 个有效评分榜：
+                                {row.record.opponentsBySharedSources[count] ??
+                                  0}
+                                场
+                              </div>
+                            ))}
                           <div>
                             这里只说明对局样本；BT 按对手强度给每场对局加权。
                           </div>
@@ -1363,7 +1374,7 @@ export function Rankings({
           />
           <p className="mt-[8px] mb-0 px-[21px] pt-0 pb-[18px] text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
             {view === "fusion"
-              ? `PK 主积分来自四榜多数对决的 Bradley-Terry 强度（平局半胜，Gamma(2,1) 弱先验），以 Elo 尺度展示：中位模型 1000，400 分差约等于 10∶1 预测胜率。它是相对强度，不是实测胜率或能力百分比；主榜只给至少 ${analysis.requiredOpponents} 个有效对手的模型名次，低样本模型保留原始战绩但不参与主榜与前沿；对局图不连通时不给出全局名次。榜单位次均值由同一批来源的排名百分位等权平均，只在 PK 同分时排序。现行 Copeland 胜率与名次作为诊断保留在模型对比和 CSV 中，不进入主榜、前沿或分享参数。`
+              ? `PK 主积分来自五榜多数对决的 Bradley-Terry 强度（平局半胜，Gamma(2,1) 弱先验），以 Elo 尺度展示：中位模型 1000，400 分差约等于 10∶1 预测胜率。它是相对强度，不是实测胜率或能力百分比；主榜只给至少 ${analysis.requiredOpponents} 个有效对手的模型名次，低样本模型保留原始战绩但不参与主榜与前沿；对局图不连通时不给出全局名次。榜单位次均值由同一批来源的排名百分位等权平均，只在 PK 同分时排序。现行 Copeland 胜率与名次作为诊断保留在模型对比和 CSV 中，不进入主榜、前沿或分享参数。`
               : view === "livebench"
                 ? "名次按当前纳入配置的分类等权均分计算，并列同名次；与源站 Overall 排名可能不同。"
                 : "源站名次由当前纳入配置按原始总分计算，并列同名次；不复刻源站的置信区间排名。"}

@@ -535,7 +535,7 @@ function App() {
   // 导出附带数据时间与评分口径，保证日后可复核同一结论。
   const scopeLabel = useMemo(() => {
     const parts = [
-      `四榜多数对决 Bradley-Terry（主榜至少 ${analysis.requiredOpponents} 个有效对手，位次均值仅同分排序）`,
+      `五榜多数对决 Bradley-Terry（主榜至少 ${analysis.requiredOpponents} 个有效对手，位次均值仅同分排序）`,
       `至少 ${analysis.required} 榜`,
       estimated ? "允许 AA 估算" : "排除 AA 估算",
     ];
@@ -1018,9 +1018,11 @@ function App() {
       <main className="mx-auto max-w-[1640px] pt-[28px] px-[38px] pb-[20px] max-1180:pt-[26px] max-1180:px-[25px] max-760:pt-[24px] max-760:px-[16px]">
         <div className="page-heading">
           <div>
-            <div className="eyebrow">AA / VALS / LIVEBENCH / ARENA</div>
+            <div className="eyebrow">
+              AA / VALS / LIVEBENCH / ARENA / MODELDIAL
+            </div>
             <h1 className="text-[29px] leading-[1.4] font-[650] tracking-[-0.035em] my-[10px] max-1180:text-[26px] max-760:text-[23px] max-760:leading-[1.5]">
-              四榜融合，全面认识一个模型
+              五榜融合，全面认识一个模型
             </h1>
             <p className="text-[12px] leading-[1.8] text-[#657e8d] m-0 max-760:text-[11px] max-760:leading-[1.9]">
               综合排行、单榜证据、模型对比与成本前沿。持续发现新模型，重点关注开放权重。
@@ -1132,7 +1134,7 @@ function App() {
               aria-hidden="true"
             />
             <small className="block text-[11px] text-[#718592] max-760:text-[10px]">
-              四榜共同覆盖
+              五榜共同覆盖
             </small>
             <strong className="block text-[31px] font-semibold tracking-[-0.045em] leading-[1.65] tabular-nums text-green max-760:text-[28px] max-760:leading-[1.7]">
               {evaluationModels.filter((m) =>
@@ -1147,7 +1149,7 @@ function App() {
               </em>
             </strong>
             <span className="text-[10px] text-[#8b9aa5] max-1180:text-[9px] max-760:text-[8px] max-760:leading-[1.6] max-760:block">
-              四个来源均披露有效总分
+              五个来源均披露有效总分
             </span>
           </div>
         </section>
@@ -1186,7 +1188,7 @@ function App() {
         <div className="scoring-context">
           <span className="flex items-center gap-[8px] flex-wrap">
             <SettingOutlined aria-hidden="true" /> PK 主积分 · BT / Elo ·
-            四榜各一票 · 至少 {analysis.required} 榜 · 至少{" "}
+            五榜各一票 · 至少 {analysis.required} 榜 · 至少{" "}
             {analysis.requiredOpponents} 个有效对手 ·{" "}
             {estimated ? "允许估算" : "排除估算"}
             {excludeHistorical ? " · 排除历史" : ""}
@@ -1538,7 +1540,7 @@ function App() {
           </>
         )}
         <footer className="flex justify-between gap-[20px] pt-[25px] pb-[28px] text-[#a0adb5] text-[9px] leading-[1.9] tracking-[0.025em] max-760:flex-col max-760:gap-[7px] max-760:py-[23px] max-760:text-[8px]">
-          <span>MODEL ATLAS / 四榜融合工作台</span>
+          <span>MODEL ATLAS / 五榜融合工作台</span>
           <span>
             数据最后刷新尝试：{formatTime(data?.lastRefresh)}
             　·　模型族级比较，跨站配置不完全相同
@@ -1906,13 +1908,13 @@ function App() {
             如何确定每榜票数？
           </h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            采用多数对决，四榜各一票，不提供任意权重推荐。所有页面和分享链接统一使用当前规则。
+            采用多数对决，五榜各一票，不提供任意权重推荐。所有页面和分享链接统一使用当前规则。
           </p>
           <h3 className="text-[15px] text-[#3d5a68] mt-[24px]">
             如何计算 PK 主积分？
           </h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            默认至少两榜准入。每对模型共同有效榜单不少于两榜才比赛，每榜一票；领先榜数多者胜，相同则平局，四榜
+            默认至少两榜准入。每对模型共同有效榜单不少于两榜才比赛，每榜一票；领先榜数多者胜，相同则平局，五榜
             2∶2 时该场判平。把所有有效对局交给 Bradley-Terry
             模型（平局半胜、Gamma(2,1) 弱先验）拟合相对强度，再以 Elo
             尺度展示：中位模型 1000，400 分差约等于 10∶1
@@ -1925,7 +1927,7 @@ function App() {
             Copeland 胜率（100 ×（胜场 + 0.5 × 平场）÷
             实际对手数）和名次只作为诊断保留在模型对比与
             CSV，不进入主榜、前沿、同分排序或分享参数。BT
-            主积分相同才按已有榜单排名百分位的等权平均排序；位次均值只作同分排序，不作为第五票，也不与主分再次合并。不足两榜的模型仍展示原始分，但不参加正式排名或前沿。对手集合可能不同，等级分的可比性弱于完整四榜样本；对比页展示共同榜数、票数、原始分与分差。位次均值不参与帕累托纵轴或支配判断。
+            主积分相同才按已有榜单排名百分位的等权平均排序；位次均值只作同分排序，不作为第五票，也不与主分再次合并。不足两榜的模型仍展示原始分，但不参加正式排名或前沿。对手集合可能不同，等级分的可比性弱于完整五榜样本；对比页展示共同榜数、票数、原始分与分差。位次均值不参与帕累托纵轴或支配判断。
           </p>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
             帕累托搜索只标注图中命中点并保留全部点位；厂商、文本和前沿条件只过滤下方模型表；预算只改变显示，成本切换不改变积分。估算及质量排除开关会改变参赛样本，因此会重算积分。

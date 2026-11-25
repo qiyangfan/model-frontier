@@ -13,6 +13,7 @@ import {
   parseArena,
   parseVals,
   parseLivebench,
+  parseModelDial,
 } from "../server/adapters.mjs";
 
 // AA 的全量数据是 AES-256-GCM 加密后 gzip 的 JSON，IV 取 SHA-256(key) 前 12 字节。
@@ -768,4 +769,165 @@ test("Arena download failures and corrupted files fail clearly instead of invent
   } finally {
     globalThis.fetch = original;
   }
+});
+
+// ModelDial：站点 Coding 榜的客户端数据源是 overview.json，分数按 qualityScores.weights
+// 五轴加权自算（站点不直接给总分），未发布模型与 bot 条目必须剔掉。
+const modelDialDoc = (overrides = {}) => ({
+  displayNames: { "anthropic/claude-fable-5.2": "Claude Fable 5.2" },
+  hiddenModelIds: ["union-alpha", "qwen4-max-preview"],
+  qualityScores: {
+    weights: {
+      backend: 30,
+      frontend: 15,
+      knowledge: 25,
+      aesthetic: 15,
+      maintainability: 15,
+    },
+  },
+  snapshot: {
+    published_at: "2026-11-23T08:34:44.710Z",
+    batch_id: "overall-abc",
+    entries: [
+      {
+        model_id: "anthropic/claude-fable-5.2",
+        candidate_id: "Claude:claude-fable-5.2:xhigh",
+        reasoning_effort: "xhigh",
+        backend_score: 60,
+        frontend_score: 40,
+        knowledge_score: 80,
+        aesthetic_score: 90,
+        maintainability_score: 70,
+      },
+      // 同模型另一档位，分数更低 → 应被最高分配置顶掉
+      {
+        model_id: "anthropic/claude-fable-5.2",
+        candidate_id: "Claude:claude-fable-5.2:low",
+        reasoning_effort: "low",
+        backend_score: 30,
+        frontend_score: 20,
+        knowledge_score: 40,
+        aesthetic_score: 50,
+        maintainability_score: 30,
+      },
+      // 未发布模型，站点自己也藏着 → 不入榜
+      {
+        model_id: "union-alpha",
+        candidate_id: "opencode:union-alpha:default",
+        backend_score: 99,
+        frontend_score: 99,
+        knowledge_score: 99,
+        aesthetic_score: 99,
+        maintainability_score: 99,
+      },
+      // 外部产品（bot）评估，不是模型 → 不入榜
+      {
+        model_id: "dot",
+        product_kind: "bot",
+        backend_score: 99,
+        frontend_score: 99,
+        knowledge_score: 99,
+        aesthetic_score: 99,
+        maintainability_score: 99,
+      },
+      ...(overrides.extraEntries ?? []),
+    ],
+  },
+});
+
+test("ModelDial: 五轴加权自算总分，每模型只留最高分配置", () => {
+  const r = parseModelDial(modelDialDoc());
+  assert.equal(r.rows.length, 1);
+  const row = r.rows[0];
+  assert.equal(row.name, "Claude Fable 5.2");
+  assert.equal(row.configuration, "xhigh");
+  assert.equal(row.source, "modeldial");
+  // 60*0.30 + 40*0.15 + 80*0.25 + 90*0.15 + 70*0.15 = 68
+  assert.equal(row.score, 68);
+  assert.equal(r.sourceDate, "2026-11-23");
+  assert.equal(r.releaseKey, "overall-abc");
+});
+
+test("ModelDial: 缺轴、权重为空、结构漂移都必须明确报错，不产出半条数据", () => {
+  // 轴分是 null：Number(null) 会变 0，等于凭空把这条 68 分改成 58 分的假条目，
+  // 必须整条剔掉，让同模型剩下的档位顶上，而不是照收
+  const nullAxis = modelDialDoc();
+  nullAxis.snapshot.entries[0].maintainability_score = null;
+  const kept = parseModelDial(nullAxis);
+  assert.equal(kept.rows.length, 1);
+  assert.equal(kept.rows[0].configuration, "low");
+  assert.equal(kept.rows[0].score, 34);
+  const noWeights = modelDialDoc();
+  noWeights.qualityScores.weights = {};
+  assert.throws(() => parseModelDial(noWeights), /权重/);
+  const noEntries = modelDialDoc();
+  delete noEntries.snapshot.entries;
+  assert.throws(() => parseModelDial(noEntries), /ModelDial/);
+  // 权重总和为 0 会让除法出 NaN，必须先挡掉
+  const zeroWeights = modelDialDoc();
+  zeroWeights.qualityScores.weights = { backend: 0, frontend: 0 };
+  assert.throws(() => parseModelDial(zeroWeights), /权重/);
+});
+
+test("ModelDial: 新 route 顶掉旧 route 的条目仍按最高分取，且不会重复计入", () => {
+  const doc = modelDialDoc({
+    extraEntries: [
+      {
+        model_id: "google/gemini-4-neon",
+        candidate_id: "openrouter:google/gemini-4-neon:high",
+        reasoning_effort: "high",
+        listing_replaces: "piax-web:gemini-4-neon:high",
+        backend_score: 50,
+        frontend_score: 50,
+        knowledge_score: 50,
+        aesthetic_score: 50,
+        maintainability_score: 50,
+      },
+      // 被顶掉的旧 route：即使分数更高也不算数
+      {
+        model_id: "google/gemini-4-neon",
+        candidate_id: "piax-web:gemini-4-neon:high",
+        reasoning_effort: "high",
+        backend_score: 99,
+        frontend_score: 99,
+        knowledge_score: 99,
+        aesthetic_score: 99,
+        maintainability_score: 99,
+      },
+    ],
+  });
+  const r = parseModelDial(doc);
+  assert.deepEqual(r.rows.map((x) => x.name).sort(), [
+    "Claude Fable 5.2",
+    "google/gemini-4-neon",
+  ]);
+  // 新 route 的 50 分胜出，旧 route 的 99 分被 listing_replaces 挡掉
+  assert.equal(r.rows.find((x) => x.name === "google/gemini-4-neon").score, 50);
+});
+
+test("ModelDial: hiddenModelIds 混放两种形态，按 model_id 与 candidate_id 都要挡住", () => {
+  // 站点那份清单里既有裸 model_id，也有带 route 前缀的 candidate_id 长 id，
+  // 只匹配一种会漏掉未发布模型。
+  const doc = modelDialDoc({
+    extraEntries: [
+      {
+        model_id: "nvidia/nemotron-3-ultra-550b-a55b",
+        candidate_id:
+          "openrouter-opus55:nvidia/nemotron-3-ultra-550b-a55b:free:default",
+        backend_score: 99,
+        frontend_score: 99,
+        knowledge_score: 99,
+        aesthetic_score: 99,
+        maintainability_score: 99,
+      },
+    ],
+  });
+  doc.hiddenModelIds = [
+    ...doc.hiddenModelIds,
+    "openrouter-opus55:nvidia/nemotron-3-ultra-550b-a55b:free:default",
+  ];
+  assert.deepEqual(
+    parseModelDial(doc).rows.map((x) => x.name),
+    ["Claude Fable 5.2"],
+  );
 });

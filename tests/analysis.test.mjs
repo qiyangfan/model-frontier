@@ -10,6 +10,7 @@ import {
   sourceAudit,
 } from "../src/analysis.mjs";
 import { familyKey, aggregate } from "../server/identity.mjs";
+import { SCORE_SOURCES, SOURCE_NAMES } from "../shared/sources.mjs";
 const analyzeSmall = (models, options = {}) =>
   analyze(models, { minOpponents: 1, ...options });
 const model = (id, records, openWeights = true) => ({
@@ -179,6 +180,76 @@ test("CSV export neutralizes spreadsheet formula injection", () => {
     },
   ]);
   assert.ok(csv.includes("'=HYPERLINK"));
+});
+
+// 按引号规则切一行 CSV：字段值里可能含逗号（配置标签如「Name (Max, Default)」），
+// 直接 split(",") 会把一个字段算成两个，掩盖表头与数据行的列数不一致。
+const csvFields = (line) => {
+  const out = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+};
+
+test("CSV 表头与每一行的列数一致，且每个评分来源都有分数列与配置列", () => {
+  // 这条守卫针对一个真实缺陷：数据行按 SCORE_SOURCES 派生来源列，表头却写死四源，
+  // 导致第五票接入后表头 39 列、数据行 41 列，第 24 列起整体错位——
+  // 「Arena投票数」列里装的其实是 ModelDial 的分数。
+  const rows = analyzeSmall([
+    model("a", {
+      aa: { score: 10, costTask: 2, name: "A (Max)" },
+      vals: { score: 20, name: "A" },
+      arena: {
+        score: 1400,
+        voteCount: 500,
+        scoreLower: 1390,
+        scoreUpper: 1410,
+        publishedAt: "2026-10-15",
+      },
+      modeldial: { score: 30, configuration: "xhigh", name: "A (xhigh)" },
+    }),
+    model("b", {
+      aa: { score: 20, costTask: 1, name: "B" },
+      vals: { score: 10, name: "B" },
+      arena: {
+        score: 1300,
+        voteCount: 400,
+        scoreLower: 1290,
+        scoreUpper: 1310,
+        publishedAt: "2026-10-15",
+      },
+    }),
+  ]).rows;
+  const csv = csvExport(rows, { lastRefresh: "2026-11-25T00:00:00Z" });
+  const lines = csv.split("\r\n");
+  const header = csvFields(lines[0].replace(/^\ufeff/, ""));
+  assert.equal(lines.length - 1, rows.length, "数据行数应等于入参行数");
+  for (const [i, line] of lines.slice(1).entries())
+    assert.equal(
+      csvFields(line).length,
+      header.length,
+      `第 ${i + 1} 行列数与表头不一致`,
+    );
+  for (const source of SCORE_SOURCES) {
+    const label = SOURCE_NAMES[source] ?? source;
+    assert.ok(header.includes(label), `缺少来源分数列 ${label}`);
+    assert.ok(header.includes(`${label}配置`), `缺少来源配置列 ${label}配置`);
+  }
 });
 test("dominator explanation is independent of alphabetical iteration order", () => {
   const r = analyzeSmall(
@@ -430,7 +501,8 @@ import {
   codingIndices,
   valueRanking,
 } from "../src/analysis.mjs";
-test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺榜数；准入 = 有综合分+成本（ADR-0023）", () => {
+test("adjustedScores: 调整分 = composite − λ·log2(cost/100)；准入 = 有综合分+成本（ADR-0019/0023，缺榜罚分经 ADR-0026 移除）", () => {
+  const full = { vals: 90, livebench: 85, arena: 88, aa: 86, modeldial: 84 };
   const rows = [
     {
       id: "mFull",
@@ -438,14 +510,20 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺�
       openWeights: true,
       composite: 1200,
       cost: 200,
-      percentiles: { vals: 90, livebench: 85, arena: 88, aa: 86 },
+      percentiles: { ...full },
     },
     {
       id: "mMedian",
       name: "mMedian",
       composite: 1100,
       cost: 100,
-      percentiles: { vals: 60, livebench: 55, arena: 58, aa: 57 },
+      percentiles: {
+        vals: 60,
+        livebench: 55,
+        arena: 58,
+        aa: 57,
+        modeldial: 59,
+      },
     },
     {
       // 缺 1 榜 → 专项罚 15（历史校准，ADR-0023）：1300 − 0 − 15 = 1285
@@ -453,22 +531,22 @@ test("adjustedScores: 调整分 = composite − λ·log2(cost/100) − 15×缺�
       name: "mPartial",
       composite: 1300,
       cost: 100,
-      percentiles: { vals: 95, livebench: 92, arena: 30 },
+      percentiles: { vals: 95, livebench: 92, arena: 30, aa: 31 },
     },
   ];
   const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
-  // cost=200 → log2(2)=1 → 1200−10=1190（全测无缺榜罚）
+  // cost=200 → log2(2)=1 → 1200−10=1190
   assert.equal(by.mFull.adjusted, 1190);
   // openWeights 透传（性价比卡「仅开源」快筛依赖此字段）
   assert.equal(by.mFull.openWeights, true);
   // cost=100 → log2(1)=0 → 成本不罚不奖
   assert.equal(by.mMedian.adjusted, 1100);
-  // 缺 1 榜：1300 − 15×1 = 1285；floorPct 保留为描述字段
-  assert.equal(by.mPartial.adjusted, 1285);
+  // 缺 2 榜但照常入榜，且不再扣分：1300 − 0 = 1300
+  assert.equal(by.mPartial.adjusted, 1300);
   assert.equal(by.mPartial.eligible, true);
   assert.equal(by.mPartial.floorPct, 30);
-  assert.equal(by.mPartial.covered, 3);
+  assert.equal(by.mPartial.covered, 4);
   // 无综合分/成本 → 无调整分、不入榜
   const noInput = adjustedScores([
     { id: "x", name: "x", composite: null, cost: null, percentiles: {} },
@@ -561,8 +639,8 @@ test("certifyNoBrainer: 支配一致性违规可被检出（防公式回归）",
 });
 
 test("adjustedScores: 缺榜专项罚分——部分覆盖模型入榜但按缺榜数扣分（ADR-0023）", () => {
-  // 准入对齐天梯（≥2 榜有综合分即可），缺榜不除名；罚值 15/榜经历史快照校准
-  // （12 次覆盖增长事件，均值 −15.4/榜），见 docs/adr/0023
+  // 准入对齐天梯（≥2 榜有综合分即可），缺榜不除名；罚值 15/榜经历史快照校准，
+  // 其可复现性在 ADR-0026 用五榜数据重校过，见 docs/adr/0026
   const rows = [
     {
       id: "partialStrong",
@@ -576,21 +654,24 @@ test("adjustedScores: 缺榜专项罚分——部分覆盖模型入榜但按缺�
       name: "fullOk",
       composite: 1100,
       cost: 100,
-      percentiles: { vals: 70, livebench: 65, arena: 72, aa: 68 },
+      percentiles: {
+        vals: 70,
+        livebench: 65,
+        arena: 72,
+        aa: 68,
+        modeldial: 69,
+      },
     },
   ];
   const out = adjustedScores(rows, { lambda: 10 });
   const by = Object.fromEntries(out.rows.map((r) => [r.id, r]));
-  // 部分覆盖照常入榜；缺 2 榜扣 30：1300 + 10·log2(100/20)... = 1300 + 23.219 − 30
+  // 部分覆盖照常入榜，缺榜不扣分：1300 + 10·log2(100/20) = 1323.219
   assert.equal(by.partialStrong.eligible, true);
   assert.equal(by.partialStrong.covered, 2);
-  assert.equal(
-    by.partialStrong.adjusted,
-    1300 - 10 * Math.log2(20 / 100) - 15 * 2,
-  );
-  // 全测无罚：1100 − 0 = 1100
+  assert.equal(by.partialStrong.adjusted, 1300 - 10 * Math.log2(20 / 100));
+  // 全测：1100 − 0 = 1100
   assert.equal(by.fullOk.adjusted, 1100);
-  assert.equal(by.fullOk.covered, 4);
+  assert.equal(by.fullOk.covered, SCORE_SOURCES.length);
   // 唯一候选 → 认证语义成立（poolSize=1）
   const onlyOne = certifyNoBrainer(adjustedScores([rows[0]], { lambda: 10 }));
   assert.equal(onlyOne.poolSize, 1);

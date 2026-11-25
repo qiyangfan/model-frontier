@@ -1,5 +1,13 @@
-import { SCORE_SOURCES, COST_SOURCES } from "../shared/sources.mjs";
+import {
+  SCORE_SOURCES,
+  COST_SOURCES,
+  SOURCE_NAMES,
+} from "../shared/sources.mjs";
 export { COST_SOURCES } from "../shared/sources.mjs";
+// 展示名跟着评分来源清单派生：加一票只需改 shared/sources.mjs 一处。
+export const NAMES = Object.fromEntries(
+  SCORE_SOURCES.map((source) => [source, SOURCE_NAMES[source] ?? source]),
+);
 // Gamma(2,1) 弱先验等价于各加 1 个伪胜场与 1 个伪对手，保证全胜/全败模型强度有限。
 const BT_PRIOR = 1;
 const BT_TOLERANCE = 1e-13;
@@ -541,6 +549,11 @@ const isoTime = (value) => {
   return Number.isFinite(t) ? new Date(t).toISOString() : "";
 };
 export function csvExport(rows, meta = {}) {
+  // 共同有效榜数从 2 起（majorityRecords 要求至少两榜才配对），到来源总数为止。
+  const sharedBuckets = Array.from(
+    { length: Math.max(0, SCORE_SOURCES.length - 1) },
+    (_, i) => i + 2,
+  );
   const header = [
     "模型",
     "厂商",
@@ -557,14 +570,8 @@ export function csvExport(rows, meta = {}) {
     "全球前沿",
     "开放权重前沿",
     "未入图原因",
-    "AA",
-    "Vals",
-    "LiveBench",
-    "Arena",
-    "AA配置",
-    "Vals配置",
-    "LiveBench配置",
-    "Arena配置",
+    ...SCORE_SOURCES.map((s) => NAMES[s]),
+    ...SCORE_SOURCES.map((s) => `${NAMES[s]}配置`),
     "Arena投票数",
     "Arena评分区间下限",
     "Arena评分区间上限",
@@ -576,9 +583,7 @@ export function csvExport(rows, meta = {}) {
     "平场",
     "负场",
     "对手数",
-    "双方共有2个有效评分榜的对局数",
-    "双方共有3个有效评分榜的对局数",
-    "双方共有4个有效评分榜的对局数",
+    ...sharedBuckets.map((n) => `双方共有${n}个有效评分榜的对局数`),
     "榜单位次均值（仅PK同分排序）",
   ];
   const scope = typeof meta.scope === "string" ? meta.scope : "";
@@ -638,14 +643,12 @@ export function csvExport(rows, meta = {}) {
         r.representatives.arena?.publishedAt,
         dataTime,
         scope,
-        `四榜多数对决 Bradley-Terry MAP（Gamma(2,1) 先验，平局半胜；PK主积分为 Elo 尺度，主榜至少 ${minOpponents} 个有效对手，位次均值仅同分排序）`,
+        `五榜多数对决 Bradley-Terry MAP（Gamma(2,1) 先验，平局半胜；PK主积分为 Elo 尺度，主榜至少 ${minOpponents} 个有效对手，位次均值仅同分排序）`,
         r.record?.wins,
         r.record?.draws,
         r.record?.losses,
         r.record?.opponents,
-        r.record?.opponentsBySharedSources?.[2],
-        r.record?.opponentsBySharedSources?.[3],
-        r.record?.opponentsBySharedSources?.[4],
+        ...sharedBuckets.map((n) => r.record?.opponentsBySharedSources?.[n]),
         r.auxiliary?.toFixed(4),
       ]),
     ]
@@ -710,24 +713,27 @@ export function sourceAudit(models, modelId, source) {
   };
 }
 
-// ══════════ ADR-0019：成本调整综合分与无脑选决策层（准入与罚分经 ADR-0021/0023 演进） ══════════
-// 调整分 = composite − λ·log2(costIndex/100) − MISSING_BOARD_PENALTY×缺榜数。
+// ══════════ ADR-0019：成本调整综合分与无脑选决策层（准入经 ADR-0021/0023 演进；缺榜罚分经 ADR-0026 移除） ══════════
+// 调整分 = composite − λ·log2(costIndex/100)。
 // ADR-0021 移除每榜短板线（原「塌方门」）：取值 0~50 认证与首选恒不变，且每榜否决权
-// 锚错专项。ADR-0023 移除 4/4 覆盖门、改为专项缺榜罚分：准入对齐天梯（≥2 榜有综合分
-// + 综合成本）；罚值 15 来自历史校准——34 条四源快照、12 次覆盖增长事件，每补一榜
-// 综合分漂移均值 −15.4（缺榜平均高估）、中位 ≈−3、|漂移| 中位 23.4（缺榜时大致在位，
-// 不确定性尾部大，见 docs/adr/0023）。floorPct 保留为描述字段。
+// 锚错专项。ADR-0023 移除 4/4 覆盖门，准入对齐天梯（≥2 榜有综合分 + 综合成本）。
+// ADR-0026 移除缺榜专项罚分（原 −15×缺榜数），理由是它站不住：
+//   1. 依据不可复现——「每补一榜综合分漂移 −15.4」用留一榜（当前五源快照，n=110）、
+//      历史覆盖增长事件（60 条历史记录里 70 次，带 n=3422 的对照组）、横截面三种互相
+//      独立的方法分别得到 −7.4 / +87.9 / 无单调因果，都对不上，量级差一个数量级。
+//   2. 实测无效——五源下性价比榜前 15 名只改变 1 个条目；覆盖 ≤3 榜的模型名次移动
+//      ≤3 位，且始终在第 17 名以后，罚与不罚都进不了头部。
+//   3. 本意是防「缺榜高估」，但缺榜的后果由拟合本身承担：共同有效榜不足 2 就不配对
+//      （见 majorityRecords），缺一榜等于直接减少可比的对手，低覆盖模型天然落到榜尾。
+//      罚分是同一作用上的第二道闸。
+// 覆盖面不再折成分数里的暗项，改为直接展示（Portal 的 N/5 榜、对比页的共同有效榜）。
+// floorPct 保留为描述字段。
 // 扫描取 6 个格点即精确：调整分对 λ 线性，上包络顶线更替只能发生在交叉点且必改变其所在
 // 区间端点的 argmax，故 [0,40] 连续区间内任何 argmax 更替都会在格点上显形，格点认证
 // 与连续认证等价、非近似。
 // λ=10：经三榜交叉 21 模型实测市场斜率 9.4±2.7/翻倍校准（2026-11-10，详见 docs/adr/0019）。
 
-// 缺榜专项罚分（综合分/每榜）：历史校准均值 |−15.4| 取整；独立于成本轴与 λ（证据罚
-// 不随预算观感缩放），见 docs/adr/0023。
-export const MISSING_BOARD_PENALTY = 15;
-
 export function adjustedScores(rows, { lambda = 10 } = {}) {
-  const boardCount = SCORE_SOURCES.length;
   const out = rows.map((r) => {
     const pct = Number.isFinite(r.composite)
       ? Object.values(r.percentiles ?? {}).filter(Number.isFinite)
@@ -735,11 +741,8 @@ export function adjustedScores(rows, { lambda = 10 } = {}) {
     const floorPct = pct.length ? Math.min(...pct) : null;
     const hasInput =
       Number.isFinite(r.composite) && Number.isFinite(r.cost) && r.cost > 0;
-    const missing = Math.max(0, boardCount - pct.length);
     const adjusted = hasInput
-      ? r.composite -
-        lambda * Math.log2(r.cost / 100) -
-        MISSING_BOARD_PENALTY * missing
+      ? r.composite - lambda * Math.log2(r.cost / 100)
       : null;
     const eligible = hasInput;
     const reason = !hasInput
@@ -785,11 +788,8 @@ export function certifyNoBrainer(
     let pick = null;
     let value = -Infinity;
     for (const r of pool) {
-      // 分档扫描与排序键同构：含缺榜罚（罚为固定常量，不随 λ 缩放——证据罚与预算观感无关）
-      const v =
-        r.composite -
-        lam * Math.log2(r.cost / 100) -
-        MISSING_BOARD_PENALTY * Math.max(0, SCORE_SOURCES.length - r.covered);
+      // 分档扫描与排序键同构：同一个 composite − λ·log2(cost/100)
+      const v = r.composite - lam * Math.log2(r.cost / 100);
       if (v > value) {
         value = v;
         pick = r.id;

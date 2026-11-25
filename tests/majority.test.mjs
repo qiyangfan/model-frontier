@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { analyze, majorityMatch, csvExport } from "../src/analysis.mjs";
 import { rankedModels } from "../src/portal.mjs";
 import { applyEvidencePolicy } from "../src/evidence.mjs";
+import { SCORE_SOURCES } from "../shared/sources.mjs";
+// 来源清单跟着 SCORE_SOURCES 走，新增一票时这些夹具不必逐个改。
 const model = (id, scores) => ({
   id,
   name: id,
   openWeights: true,
   representatives: Object.fromEntries(
-    ["aa", "vals", "livebench", "arena"].flatMap((s, i) =>
+    SCORE_SOURCES.flatMap((s, i) =>
       scores[i] == null ? [] : [[s, { score: scores[i], costTask: 1 }]],
     ),
   ),
@@ -20,7 +22,12 @@ const record = (wins, draws, losses, opponents, shared = {}) => ({
   draws,
   losses,
   opponents,
-  opponentsBySharedSources: { 2: 0, 3: 0, 4: 0, ...shared },
+  opponentsBySharedSources: Object.fromEntries(
+    Array.from({ length: SCORE_SOURCES.length - 1 }, (_, i) => [
+      i + 2,
+      shared[i + 2] ?? 0,
+    ]),
+  ),
 });
 // 两模型一胜一负、Gamma(2,1) 先验下的已知 BT 解：强度比 2，Elo 围绕 1000 对称。
 const oneWinGap = (400 / Math.LN10) * (Math.log(2) / 2);
@@ -72,18 +79,26 @@ test("majority cycles produce tied scores with deterministic competition ranks",
 
 test("opponent records group matches by the number of shared valid score sources", () => {
   const result = run([
-    model("full-a", [5, 5, 5, 5]),
-    model("full-b", [4, 4, 4, 4]),
-    model("three", [3, 3, 3, null]),
-    model("two", [2, 2, null, null]),
+    model("full-a", [5, 5, 5, 5, 5]),
+    model("full-b", [4, 4, 4, 4, 4]),
+    model("three", [3, 3, 3, null, null]),
+    model("two", [2, 2, null, null, null]),
   ]);
+  // 按来源总数推导期望，加票不必回来改数字
+  const buckets = (counts) =>
+    Object.fromEntries(
+      Array.from({ length: SCORE_SOURCES.length - 1 }, (_, i) => [
+        i + 2,
+        counts[i + 2] ?? 0,
+      ]),
+    );
   assert.deepEqual(
     result.rows.map((row) => row.record.opponentsBySharedSources),
     [
-      { 2: 1, 3: 1, 4: 1 },
-      { 2: 1, 3: 1, 4: 1 },
-      { 2: 1, 3: 2, 4: 0 },
-      { 2: 3, 3: 0, 4: 0 },
+      buckets({ 2: 1, 3: 1, 5: 1 }),
+      buckets({ 2: 1, 3: 1, 5: 1 }),
+      buckets({ 2: 1, 3: 2 }),
+      buckets({ 2: 3 }),
     ],
   );
   for (const row of result.rows) {
@@ -190,7 +205,10 @@ test("costs do not change ballots, ranks or opponents; exports include exact res
   assert.match(csv, /双方共有2个有效评分榜的对局数/);
   assert.match(csv, /双方共有3个有效评分榜的对局数/);
   assert.match(csv, /双方共有4个有效评分榜的对局数/);
-  assert.match(csv, /四榜多数对决/);
+  // 档位上限跟着来源数走，加票时自动多一列
+  for (let n = 2; n <= SCORE_SOURCES.length; n += 1)
+    assert.match(csv, new RegExp(`双方共有${n}个有效评分榜的对局数`));
+  assert.match(csv, /五榜多数对决/);
 });
 
 test("two-source rule admits two-source models but never counts a one-source overlap", () => {
@@ -342,14 +360,14 @@ test("mathematically equal auxiliary averages remain tied across summation order
   );
 });
 
-// ─── Arena 第四票：每榜一票，四榜 2∶2 判平，不引入新权重 ───
+// ─── Arena 第四票：每榜一票，四票 2∶2 判平，不引入新权重 ───
 
 test("four ballots: a 2-2 split is a draw, a 3-1 split follows the majority", () => {
   const a = model("a", [51, 51, 0, 10]),
     b = model("b", [50, 50, 100, 20]);
   const match = majorityMatch(a, b);
   assert.deepEqual([match.leftWins, match.rightWins, match.tied], [2, 2, 0]);
-  assert.equal(match.result, 0, "四榜 2∶2 为该场平局");
+  assert.equal(match.result, 0, "四票 2∶2 为该场平局");
   for (const row of run([a, b]).rows) {
     assert.equal(row.composite, 1000);
     assert.equal(row.winRate, 50);
@@ -358,7 +376,12 @@ test("four ballots: a 2-2 split is a draw, a 3-1 split follows the majority", ()
       draws: 1,
       losses: 0,
       opponents: 1,
-      opponentsBySharedSources: { 2: 0, 3: 0, 4: 1 },
+      opponentsBySharedSources: Object.fromEntries(
+        Array.from({ length: SCORE_SOURCES.length - 1 }, (_, i) => [
+          i + 2,
+          i + 2 === 4 ? 1 : 0,
+        ]),
+      ),
     });
   }
   const c = model("c", [51, 51, 51, 0]),
@@ -422,7 +445,7 @@ test("a stale Arena source is excluded like any other stale source", () => {
 });
 
 test("the auxiliary average spans all four sources with Arena included", () => {
-  // a-b 四榜 2∶2 平，b 3∶1 胜 c，c 3∶1 胜 a；辅助分为四榜百分位精确平均。
+  // a-b 四票 2∶2 平，b 3∶1 胜 c，c 3∶1 胜 a；辅助分为四源百分位精确平均。
   const models = [
     model("a", [9, 1, 5, 1]),
     model("b", [5, 9, 1, 9]),

@@ -51,7 +51,12 @@ export function aggregate(sources) {
         representatives.vals ??
         representatives.livebench ??
         representatives.aa ??
-        representatives.arena;
+        representatives.arena ??
+        representatives.modeldial ??
+        // 上面五个覆盖 SCORE_SOURCES 全部；走到这里说明调用方传了清单外的来源
+        // （aggregate 接受任意 sources map），取第一条兜底，避免 preferred 变
+        // undefined 后在 preferred.name 处抛 TypeError。
+        Object.values(representatives)[0];
       const all = Object.values(g.records).flat();
       const openness = all
         .map((r) => r.openWeights)

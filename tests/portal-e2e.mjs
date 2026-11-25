@@ -561,7 +561,7 @@ try {
   await page.reload();
   await page
     .locator(".scoring-context")
-    .getByText(/四榜各一票/)
+    .getByText(/五榜各一票/)
     .waitFor();
   await page
     .locator(".scoring-context")
@@ -593,7 +593,7 @@ try {
   await tab("模型对比");
   await page
     .locator(".scoring-context")
-    .getByText(/四榜各一票/)
+    .getByText(/五榜各一票/)
     .waitFor();
   await page
     .locator(".scoring-context")
@@ -616,9 +616,9 @@ try {
     .waitFor();
   await page
     .locator(".majority-comparison")
-    .getByText(/\d\/4 榜 · (计入 PK|不计 PK)/)
+    .getByText(/\d+\/\d+ 榜 · (计入 PK|不计 PK)/)
     .waitFor();
-  // 第四票接入后，具体票数随真实数据变化，只锁定「有裁决」与 Arena 计票列存在
+  // 票数随来源清单变化，只锁定「有裁决」与 Arena 计票列存在
   await page
     .locator(".majority-comparison")
     .getByRole("columnheader", { name: "Arena", exact: true })
@@ -675,10 +675,10 @@ try {
     await (await majorityExport).path(),
     "utf8",
   );
-  assert.ok(majorityCsv.includes("四榜多数对决"));
+  assert.ok(majorityCsv.includes("五榜多数对决"));
   assert.ok(
     majorityCsv.includes(
-      "四榜多数对决 Bradley-Terry（主榜至少 10 个有效对手，位次均值仅同分排序）",
+      "五榜多数对决 Bradley-Terry（主榜至少 10 个有效对手，位次均值仅同分排序）",
     ),
   );
   assert.ok(majorityCsv.includes("位次均值仅同分排序"));

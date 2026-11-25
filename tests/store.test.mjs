@@ -27,6 +27,7 @@ test("legacy cache drops retired sources and preserves hourly refresh", async ()
     "aa",
     "arena",
     "livebench",
+    "modeldial",
     "vals",
   ]);
   assert.equal(data.sources.arena.count, 0);
