@@ -5,16 +5,17 @@ import { rankedModels } from "../src/portal.mjs";
 import { applyEvidencePolicy } from "../src/evidence.mjs";
 import { SCORE_SOURCES } from "../shared/sources.mjs";
 // 来源清单跟着 SCORE_SOURCES 走，新增一票时这些夹具不必逐个改。
-const model = (id, scores) => ({
-  id,
-  name: id,
-  openWeights: true,
-  representatives: Object.fromEntries(
+const model = (id, scores) => {
+  const representatives = Object.fromEntries(
     SCORE_SOURCES.flatMap((s, i) =>
       scores[i] == null ? [] : [[s, { score: scores[i], costTask: 1 }]],
     ),
-  ),
-});
+  );
+  // 成本基准取「全源齐价」样本；夹具默认给 modeldial 占位成本，
+  // 使三源时代的成本语义（成本可算、基准可建）在四源下保持成立。
+  representatives.modeldial ??= { score: null, costTask: 1 };
+  return { id, name: id, openWeights: true, representatives };
+};
 const run = (models, options = {}) =>
   analyze(models, { minOpponents: 1, ...options });
 const record = (wins, draws, losses, opponents, shared = {}) => ({
@@ -200,7 +201,7 @@ test("costs do not change ballots, ranks or opponents; exports include exact res
   // 档位上限跟着来源数走，加票时自动多一列
   for (let n = 2; n <= SCORE_SOURCES.length; n += 1)
     assert.match(csv, new RegExp(`双方共有${n}个有效评分榜的对局数`));
-  assert.match(csv, /五榜多数对决/);
+  assert.match(csv, /6 榜多数对决/);
 });
 
 test("two-source rule admits two-source models but never counts a one-source overlap", () => {

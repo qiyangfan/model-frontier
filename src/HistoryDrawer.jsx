@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Drawer, Empty, Select, Spin, Table, Tag } from "antd";
-import { NAMES, formatTime, money } from "./presentation.mjs";
+import {
+  MODELDIAL_COST_LABEL,
+  NAMES,
+  formatTime,
+  money,
+} from "./presentation.mjs";
 import {
   emptySearch,
   matchesSearchText,
@@ -18,7 +23,7 @@ const FIELDS = {
   configuration: "配置",
   rawId: "源站标识",
   score: "原始总分",
-  costTask: "任务成本",
+  costTask: "成本",
   priceInput: "输入价格",
   priceOutput: "输出价格",
   speed: "速度",
@@ -154,7 +159,7 @@ export default function HistoryDrawer({
       render: (_, r) => changeValue(r, "score"),
     },
     {
-      title: "USD/任务 · 前 / 后",
+      title: "成本（美元） · 前 / 后",
       width: 170,
       render: (_, r) => changeValue(r, "costTask", true),
     },
@@ -255,7 +260,9 @@ export default function HistoryDrawer({
             <p className="text-[11px] leading-[1.9]">
               {selected.kind === "baseline"
                 ? "起始快照只建立基准，不将已有配置记为新发布或新增收录。"
-                : "新增 / 移除指源表中的配置收录变化，不代表模型发布或下线。各配置独立比较，不连接不同 effort 的价格或分数。"}
+                : "新增 / 移除指源表中的配置收录变化，不代表模型发布或下线。各配置独立比较，不连接不同 effort 的价格或分数。"}{" "}
+              ModelDial 显示{MODELDIAL_COST_LABEL}，AA、Vals、LiveBench
+              显示每次任务成本。
             </p>
             {selected.sourceChanges?.length > 0 &&
               selected.kind !== "baseline" && (
@@ -304,7 +311,11 @@ export default function HistoryDrawer({
                       width: 250,
                     },
                     { title: "原始分", dataIndex: "score", render: raw },
-                    { title: "USD/任务", dataIndex: "costTask", render: money },
+                    {
+                      title: "成本（美元）",
+                      dataIndex: "costTask",
+                      render: money,
+                    },
                   ]}
                 />
               </>

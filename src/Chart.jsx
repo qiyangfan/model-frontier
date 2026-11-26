@@ -27,8 +27,14 @@ import {
   costFormat,
   isDomesticCreator,
   money,
+  moneyIn,
   NAMES,
 } from "./presentation.mjs";
+import {
+  COST_CURRENCY,
+  COST_SOURCES,
+  SINGLE_COST_SOURCES,
+} from "../shared/sources.mjs";
 import {
   dominationZoneVisible,
   isZoomed,
@@ -456,17 +462,16 @@ export default function Chart({
                     "、",
                   )}${overlaps.length > shown.length ? " 等" : ""}；可在搜索框输入名称，以厂商专属色描边定位</div>`
               : "";
-            const dollars = ["aa", "vals", "livebench"]
-              .map(
-                (s) =>
-                  `<div class="flex justify-between py-[4px] text-[11px] text-[#8295a2]"><span>${esc(NAMES[s])}</span><b class="font-medium tabular-nums text-[#4b6573]">${money(r.representatives[s]?.costTask)}</b></div>`,
-              )
-              .join("");
+            // 悬浮卡列每次任务成本，ModelDial 的整轮评测费用见模型详情。
+            const dollars = SINGLE_COST_SOURCES.map(
+              (s) =>
+                `<div class="flex justify-between py-[4px] text-[11px] text-[#8295a2]"><span>${esc(NAMES[s])}</span><b class="font-medium tabular-nums text-[#4b6573]">${money(r.representatives[s]?.costTask)}</b></div>`,
+            ).join("");
             // 被支配模型在 tooltip 里直接点名支配者，与图上跟随鼠标的斩杀区互为反向查询
             const dominated = r.dominatedBy?.length
               ? `<div class="mx-[18px] border-t border-t-[#edf1f4] py-[10px] text-[10px] leading-[1.7] text-[#a9635a] whitespace-normal [overflow-wrap:anywhere]">被 ${esc(r.dominatedBy.slice(0, 2).join("、"))}${r.dominatedBy.length > 2 ? ` 等 ${r.dominatedBy.length} 个前沿模型` : ""}同时以更低成本、更高 PK 主积分支配</div>`
               : "";
-            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div>${overlapHtml}<div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">三站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/3 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : r.cnFrontier ? "国产前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
+            return `<div class="border-b border-b-[#edf1f4] pt-[17px] px-[18px] pb-[13px]"><div class="mb-[6px] text-[10px] text-[#178571]">${r.openWeights === true ? "开放权重" : "闭源 / 开放状态未确认"}</div><strong class="block text-[14px] font-semibold text-[#274354]">${esc(r.name)}</strong><span class="mt-[5px] block text-[10px] text-[#91a1ac]">${esc(r.creator)}</span></div>${overlapHtml}<div class="grid grid-cols-[1fr_1fr] gap-[25px] p-[15px_18px] max-760:gap-[18px]"><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">PK 主积分（Elo）</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${r.composite.toFixed(1)}<em class="text-[10px] font-normal not-italic text-[#9babb4]"> · 中位 1000</em></b></div><div><small class="mb-[6px] block text-[10px] text-[#8c9ca6]">${isRelative ? "相对基准成本" : "每次任务成本"}</small><b class="text-[19px] font-semibold tabular-nums text-[#244755] max-760:text-[17px]">${costFormat(r.cost, costSource)}</b></div></div><div class="mx-[18px] border-t border-t-[#edf1f4] py-[11px]"><div class="mb-[8px] text-[9px] text-[#9aabb5]">${SINGLE_COST_SOURCES.length} 站真实任务成本 · USD</div>${dollars}</div>${dominated}<div class="flex flex-wrap justify-between gap-[9px] bg-[#f7faf9] px-[18px] py-[11px] text-[9px] text-[#8a9e96]"><span>有效评分 ${r.available.length} 榜 · 成本 ${r.costCoverage}/${COST_SOURCES.length} 来源</span><strong class="font-medium text-[#21816a]">${r.frontier ? "全球前沿" : r.openFrontier ? "开放权重前沿" : r.cnFrontier ? "国产前沿" : "非前沿"}</strong><small class="block w-full text-[9px] text-[#a2b0a9]">点击模型查看配置与原始数据</small></div>`;
           },
         },
         legend: {
@@ -802,11 +807,13 @@ export default function Chart({
             <span className="text-[11px] text-[#557e70] max-760:text-[10px]">
               1 倍成本基准
               <small className="block text-[9px] text-[#92a69e] mt-[5px] whitespace-nowrap max-1180:inline max-1180:ml-[8px] max-760:text-[8px] max-760:ml-[7px]">
-                {costProfile?.sources?.length ?? 3} 源共同样本中位数
+                {costProfile?.sources?.length ?? COST_SOURCES.length}{" "}
+                源共同样本中位数
               </small>
             </span>
           </div>
-          {["aa", "vals", "livebench"].map((source) => (
+          {/* 这里列每次任务成本的中位数，四源基准明细见模型详情。 */}
+          {SINGLE_COST_SOURCES.map((source) => (
             <div
               key={source}
               className="flex flex-col justify-center gap-[5px] min-w-0 border-l border-l-[#e5edeb] pl-[17px] max-1180:[&:nth-child(2)]:border-l-0 max-1180:[&:nth-child(2)]:pl-0 max-760:pl-[10px]"
@@ -815,7 +822,7 @@ export default function Chart({
                 {NAMES[source]}
               </span>
               <strong className="text-[13px] font-[550] tabular-nums text-[#3e665b] max-760:text-[11px]">
-                {money(costProfile?.medians[source])}
+                {moneyIn(costProfile?.medians[source], COST_CURRENCY[source])}
                 <small className="text-[9px] font-normal text-[#9aaba5] max-760:text-[8px]">
                   {" "}
                   / 任务

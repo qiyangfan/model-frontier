@@ -2,13 +2,14 @@
 // 编码只覆盖「影响结论口径」的状态；打开同一链接即可复核同一结论，不通过链接传递任何数据本身。
 import {
   SCORE_SOURCES as SOURCES,
-  COST_SOURCES as TASK_COST_SOURCES,
+  SINGLE_COST_SOURCES,
 } from "../shared/sources.mjs";
-const COST_SOURCES = [...TASK_COST_SOURCES, "composite"];
+// 单站成本视图和预算参数接受每次任务成本来源，ModelDial 的整轮评测费用用于综合成本（ADR-0029）。
+const COST_SOURCES = [...SINGLE_COST_SOURCES, "composite"];
 const FOCUS_VALUES = ["openFirst", "all", "openOnly", "cnOnly"];
 const OPENNESS_VALUES = ["all", "open", "closed", "unknown"];
 const VIEWS = ["fusion", ...SOURCES];
-const BUDGET_SOURCES = ["none", ...TASK_COST_SOURCES];
+const BUDGET_SOURCES = ["none", ...SINGLE_COST_SOURCES];
 const MAX_TEXT = 120;
 // 默认值不写入链接，保持分享地址尽量短；带参数的链接是完整口径状态，缺省字段一律取默认值（与 reload 恢复语义一致）。
 // 无参数的地址不视为分享链接，由应用沿用本地偏好。

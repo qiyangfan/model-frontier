@@ -73,7 +73,9 @@ try {
   );
   await page.reload();
   await page
-    .getByText(/综合成本基准已按 Artificial Analysis、Vals 的共同样本重算/)
+    .getByText(
+      /综合成本基准已按 Artificial Analysis、Vals、ModelDial 的共同样本重算/,
+    )
     .waitFor();
   assert.equal(
     await page
@@ -101,7 +103,7 @@ try {
     .locator(".scoring-context")
     .getByText(/至少 2 榜/)
     .waitFor();
-  await page.getByText("2 源共同样本中位数", { exact: true }).waitFor();
+  await page.getByText("3 源共同样本中位数", { exact: true }).waitFor();
   await page.getByRole("tab", { name: "综合总览", exact: true }).click();
   await page
     .getByRole("button", { name: "对比开放权重领先模型", exact: true })
@@ -128,6 +130,12 @@ try {
   const modelHistory = page.getByRole("dialog").last();
   await modelHistory
     .getByRole("heading", { name: "此快照中的原始配置", exact: true })
+    .waitFor();
+  await modelHistory
+    .getByText(/ModelDial 显示整轮后端评测估算费用（美元）/)
+    .waitFor();
+  await modelHistory
+    .getByRole("columnheader", { name: "成本（美元）", exact: true })
     .waitFor();
   assert.ok((await modelHistory.locator("tr[data-row-key]").count()) > 0);
   await modelHistory

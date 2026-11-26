@@ -47,6 +47,12 @@ try {
     .getByRole("heading", { name: "综合能力领先", exact: true })
     .waitFor();
   await page.locator(".leader-row").first().waitFor();
+  await page.getByRole("button", { name: "计算方法", exact: true }).click();
+  const methodDrawer = page.getByRole("dialog");
+  await methodDrawer.getByText(/全量发现六站模型/).waitFor();
+  await methodDrawer.getByText(/多数对决，六榜各一票/).waitFor();
+  await methodDrawer.getByRole("button", { name: "Close" }).click();
+  await methodDrawer.waitFor({ state: "hidden" });
   await page.waitForFunction(() => {
     const saved = JSON.parse(localStorage.getItem("frontier:preferences"));
     return saved && !("preset" in saved) && !("scoringVersion" in saved);
@@ -146,6 +152,12 @@ try {
   await page
     .getByRole("cell", { name: "Arena · 投票数", exact: true })
     .waitFor();
+  await page
+    .getByRole("cell", {
+      name: "ModelDial · 整轮后端评测估算费用（美元）",
+      exact: true,
+    })
+    .waitFor();
   assert.equal(
     await page.locator(".compare-selector .ant-select-selection-item").count(),
     3,
@@ -165,6 +177,12 @@ try {
     .getByText("从排行榜勾选模型，或在上方搜索添加", { exact: true })
     .waitFor();
   await tab("融合排行榜");
+  await page
+    .locator(".controls .control-help")
+    .getByText(
+      /PK 多数对决：AA、Vals、LiveBench、Arena、ModelDial、SuperCLUE 各一票/,
+    )
+    .waitFor();
   assert.equal(
     await page
       .locator(".ranking-main-table")
@@ -331,6 +349,48 @@ try {
   assert.ok(arenaCsv.includes("原始总分"));
   assert.ok(arenaCsv.includes("投票数"), "Arena 导出缺少投票数列");
   assert.ok(arenaCsv.includes("发布日期"), "Arena 导出缺少发布日期列");
+  await source("ModelDial");
+  const modelDialTable = page.locator(".ranking-main-table");
+  const dollarCell = page.getByRole("cell", { name: /^\$\d/ });
+  const pricedRow = modelDialTable
+    .locator("tr[data-row-key]")
+    .filter({ has: dollarCell })
+    .first();
+  const modelDialCost = await pricedRow
+    .getByRole("cell", { name: /^\$\d/ })
+    .first()
+    .innerText();
+  await pricedRow.locator(".model-link").click();
+  const modelDialDetail = page.getByRole("dialog");
+  const costDetails = modelDialDetail.getByRole("table").filter({
+    has: page.getByRole("columnheader", { name: "基准中位数", exact: true }),
+  });
+  const costCells = costDetails
+    .getByRole("row")
+    .filter({ hasText: "ModelDial" })
+    .getByRole("cell");
+  assert.equal(await costCells.nth(1).innerText(), modelDialCost);
+  assert.match(await costCells.nth(2).innerText(), /^\$\d/);
+  await costDetails
+    .getByRole("columnheader", { name: "原始成本（美元）", exact: true })
+    .waitFor();
+  await modelDialDetail
+    .getByText(`整轮后端评测估算费用（美元） ${modelDialCost}`)
+    .waitFor();
+  await modelDialDetail.getByRole("button", { name: "Close" }).click();
+  await modelDialDetail.waitFor({ state: "hidden" });
+  await modelDialTable
+    .getByRole("columnheader", {
+      name: "整轮后端评测估算费用（美元）",
+      exact: true,
+    })
+    .waitFor();
+  const modelDialDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出当前榜单", exact: true }).click();
+  const modelDialCsvFile = await modelDialDownload;
+  const modelDialCsv = await readFile(await modelDialCsvFile.path(), "utf8");
+  const [modelDialHeader] = modelDialCsv.split("\r\n", 1);
+  assert.ok(modelDialHeader.includes('"整轮后端评测估算费用（美元）"'));
   await source("融合总榜");
   await page.screenshot({
     path: "test-artifacts/rankings.png",
@@ -623,8 +683,17 @@ try {
   await page
     .getByRole("combobox", { name: "预算成本来源", exact: true })
     .click();
-  await page
-    .locator(".ant-select-dropdown:visible .ant-select-item-option")
+  const budgetOptions = page.locator(
+    ".ant-select-dropdown:visible .ant-select-item-option",
+  );
+  await budgetOptions.first().waitFor();
+  assert.deepEqual(await budgetOptions.allTextContents(), [
+    "不限制",
+    "Artificial Analysis",
+    "Vals",
+    "LiveBench",
+  ]);
+  await budgetOptions
     .filter({ has: page.getByText("Artificial Analysis", { exact: true }) })
     .click();
   await page
@@ -668,7 +737,7 @@ try {
   await page.reload();
   await page
     .locator(".scoring-context")
-    .getByText(/五榜各一票/)
+    .getByText(/六榜各一票/)
     .waitFor();
   await page
     .locator(".scoring-context")
@@ -700,7 +769,7 @@ try {
   await tab("模型对比");
   await page
     .locator(".scoring-context")
-    .getByText(/五榜各一票/)
+    .getByText(/六榜各一票/)
     .waitFor();
   await page
     .locator(".scoring-context")
@@ -782,10 +851,10 @@ try {
     await (await majorityExport).path(),
     "utf8",
   );
-  assert.ok(majorityCsv.includes("五榜多数对决"));
+  assert.ok(majorityCsv.includes("6 榜多数对决"));
   assert.ok(
     majorityCsv.includes(
-      "五榜多数对决 Bradley-Terry（主榜至少 10 个有效对手，位次均值仅同分排序）",
+      "6 榜多数对决 Bradley-Terry（主榜至少 10 个有效对手，位次均值仅同分排序）",
     ),
   );
   assert.ok(majorityCsv.includes("位次均值仅同分排序"));
@@ -891,7 +960,7 @@ try {
         pages: 5,
         checks: [
           "overview",
-          "four-source rankings",
+          "six-source rankings",
           "arena native board and evidence",
           "native full configurations",
           "native export",

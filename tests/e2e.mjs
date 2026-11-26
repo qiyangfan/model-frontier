@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
+import { SCORE_SOURCES } from "../shared/sources.mjs";
 // 按引号规则切一行 CSV：配置标签里可能含逗号（如「Name (Max, Default)」），
 // 直接 split(",") 会把一个字段算成两个，得出假的错位结论。
 const csvFields = (line) => {
@@ -173,6 +174,7 @@ try {
     "arena",
     "livebench",
     "modeldial",
+    "superclue",
     "vals",
   ]);
   // Arena 已回归第四评分来源：必须有真实数据进入模型族，且披露票数证据
@@ -391,8 +393,11 @@ try {
     0,
   );
   await page.getByRole("tab", { name: "数据来源与刷新", exact: true }).click();
-  // 来源卡片数跟着 SCORE_SOURCES 走，加票时这里自动变成 5，不必回来改数字
-  assert.equal(await page.locator(".source-card").count(), 5);
+  // 来源卡片数跟着 SCORE_SOURCES 走，加票时这里自动跟着变，不必回来改数字
+  assert.equal(
+    await page.locator(".source-card").count(),
+    SCORE_SOURCES.length,
+  );
   await page.getByText("703 条源站模型配置", { exact: false }).count();
   await page
     .locator(".source-card")

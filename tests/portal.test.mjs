@@ -263,7 +263,14 @@ test("coverage counts evidence across active sources and excludes estimated scor
   const buckets = (counts) =>
     Array.from({ length: SCORE_SOURCES.length + 1 }, (_, i) => counts[i] ?? 0);
   assert.deepEqual(coverageSummary(models), {
-    counts: { aa: 1, vals: 2, livebench: 1, arena: 0, modeldial: 0 },
+    counts: {
+      aa: 1,
+      vals: 2,
+      livebench: 1,
+      arena: 0,
+      modeldial: 0,
+      superclue: 0,
+    },
     groups: buckets({ 0: 1, 1: 1, 3: 1 }),
   });
 });

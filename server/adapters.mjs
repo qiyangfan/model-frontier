@@ -2,6 +2,7 @@ import { parquetReadObjects } from "hyparquet";
 import { licenseState } from "./identity.mjs";
 import * as cheerio from "cheerio";
 import { parse } from "csv-parse/sync";
+import readXlsxFile from "read-excel-file/node";
 import { SOURCE_NAMES } from "../shared/sources.mjs";
 // 展示名从 shared/sources.mjs 派生，只有 url 与口径说明按源各写一份。
 export const SOURCE_INFO = {
@@ -24,6 +25,10 @@ export const SOURCE_INFO = {
   modeldial: {
     url: "https://modeldial.com/en/leaderboard/coding",
     metric: "Coding Overall · 工程能力",
+  },
+  superclue: {
+    url: "https://www.superclueai.com/homepage",
+    metric: "通用中文测评总分",
   },
 };
 // 兜底与 src/presentation.mjs 对齐：新增来源漏配 SOURCE_NAMES 时退回 id，
@@ -809,9 +814,14 @@ export function parseModelDial(doc) {
     if (!id) continue;
     const current = best.get(id);
     if (current && overall <= current.score) continue;
+    // costTask 沿用缓存字段名，取最高分完整配置的整轮后端评测美元估算费用（ADR-0029）。
+    const cost = Number(
+      doc.metrics?.[entry.candidate_id]?.backend?.estimated_api_cost_usd,
+    );
     best.set(id, {
       name: names[id] ?? id,
       score: overall,
+      costTask: Number.isFinite(cost) && cost > 0 ? cost : null,
       // reasoning_effort 缺失时退回 default；站方自己的 unknown 档位原样保留，不替它猜。
       configuration: entry.reasoning_effort ?? "default",
       url: SOURCE_INFO.modeldial.url,
@@ -835,6 +845,86 @@ export async function fetchModelDial() {
   );
   return parseModelDial(doc);
 }
+// SuperCLUE 通用中文测评：月更公开 xlsx。文件地址的月份字符串写死在站方前端
+// 构建产物里（站方每月重新部署），且旧月文件随新版上线即删除——历史由本项目
+// 快照自建，这里只负责找到当前月份。只读「模型名称」「总分」两列：分轴列在
+// 7 月期与 11 月期之间已换过一轮（数学推理→数理推理、删科学推理/智能体任务
+// 规划、增超长上下文），这两列是唯一稳定契约（ADR-0028）。
+const SUPERCLUE_BASE = "https://www.superclueai.com/data/generalboard/";
+const SUPERCLUE_SHEET = "总排行榜";
+const SUPERCLUE_MIN_ROWS = 12;
+export function superclueMonthLabel(date, offset = 0) {
+  const d = new Date(date.getFullYear(), date.getMonth() + offset, 1);
+  return `${d.getFullYear()}年${d.getMonth() + 1}月`;
+}
+export function parseSuperclue(data, label) {
+  if (!Array.isArray(data) || data.length === 0)
+    throw new Error("SuperCLUE 数据格式变化：工作表为空");
+  const headerIndex = data.findIndex(
+    (row) => row.includes("模型名称") && row.includes("总分"),
+  );
+  if (headerIndex === -1)
+    throw new Error("SuperCLUE 表结构变化：找不到「模型名称/总分」表头");
+  const header = data[headerIndex];
+  const nameCol = header.indexOf("模型名称");
+  const scoreCol = header.indexOf("总分");
+  const rows = [];
+  for (const row of data.slice(headerIndex + 1)) {
+    const name = typeof row[nameCol] === "string" ? row[nameCol].trim() : "";
+    const score =
+      typeof row[scoreCol] === "number" ? row[scoreCol] : number(row[scoreCol]);
+    // 整行无名字也无分数是工作表尾部补白，跳过；其余缺项都是结构异常，报错
+    // 而不是造 0 分或静默丢行（宪法：解析失败明确报错）。
+    if (!name && score == null) continue;
+    if (!name) throw new Error("SuperCLUE 表结构变化：出现无模型名称的数据行");
+    if (!Number.isFinite(score))
+      throw new Error(
+        `SuperCLUE 行「${name}」的总分不是数字：${String(row[scoreCol])}`,
+      );
+    rows.push({
+      name,
+      score,
+      url: SOURCE_INFO.superclue.url,
+      source: "superclue",
+    });
+  }
+  if (rows.length < SUPERCLUE_MIN_ROWS)
+    throw new Error(
+      `SuperCLUE 有效行仅 ${rows.length}（下限 ${SUPERCLUE_MIN_ROWS}），疑似半截载荷`,
+    );
+  const [, y, m] = label.match(/^(\d{4})年(\d{1,2})月$/);
+  return {
+    rows,
+    sourceDate: `${y}-${m.padStart(2, "0")}`,
+    releaseKey: label,
+    notes: [
+      "SuperCLUE 通用中文测评总分（月更）；国外模型站方只给参考分、不参与排名，本项目将其与国内模型同权投票。",
+      "站方无数据许可声明，数据出身仅文件名月份；月更发布且旧月文件即删，本项目历史为快照自建。",
+    ],
+  };
+}
+export async function fetchSuperclue(now = new Date()) {
+  // 当月文件未上线时回退上一月：站方月初换文件的准确窗口未经证实（ADR-0028
+  // 待验证项），最多两个候选请求内解决；sourceDate 如实记录命中文件的月份。
+  for (const offset of [0, -1]) {
+    const label = superclueMonthLabel(now, offset);
+    const file = await requestSource(
+      `${SUPERCLUE_BASE}${encodeURI(label)}.xlsx`,
+      SOURCE_TIMEOUT,
+      "*/*",
+      (r) => r.arrayBuffer(),
+    ).catch((error) => {
+      if (isRetryableSourceError(error)) throw error;
+      return null;
+    });
+    if (!file) continue;
+    const sheets = await readXlsxFile(Buffer.from(file));
+    // v9 的 node 入口返回 [{sheet, data}] 全量工作表；目标表缺失按结构异常报错。
+    const data = sheets.find((s) => s.sheet === SUPERCLUE_SHEET)?.data;
+    return parseSuperclue(data, label);
+  }
+  throw new Error("SuperCLUE 当月与上月数据文件均未获取到；保留上次数据");
+}
 export async function fetchArena() {
   // hyparquet 内部对 file 做 new DataView()，必须传真 ArrayBuffer；
   // Node Buffer 包装会抛 "First argument to DataView constructor must be an ArrayBuffer"。
@@ -853,4 +943,5 @@ export const FETCHERS = {
   vals: fetchVals,
   livebench: fetchLivebench,
   modeldial: fetchModelDial,
+  superclue: fetchSuperclue,
 };

@@ -9,14 +9,18 @@ export const COSTS = {
   vals: "Vals 每次测试成本",
   livebench: "LiveBench 每次任务成本",
 };
-export const money = (v) =>
-  !Number.isFinite(v)
+export const MODELDIAL_COST_LABEL = "整轮后端评测估算费用（美元）";
+export const money = (v) => moneyIn(v, "USD");
+export const moneyIn = (v, currency) => {
+  const sym = currency === "CNY" ? "¥" : "$";
+  return !Number.isFinite(v)
     ? "未披露"
     : v < 0.01
-      ? `$${v.toPrecision(3)}`
+      ? `${sym}${v.toPrecision(3)}`
       : v < 1
-        ? `$${v.toFixed(3)}`
-        : `$${v.toFixed(2)}`;
+        ? `${sym}${v.toFixed(3)}`
+        : `${sym}${v.toFixed(2)}`;
+};
 export function relativeCost(v) {
   if (v == null) return "未披露";
   const ratio = v / 100;

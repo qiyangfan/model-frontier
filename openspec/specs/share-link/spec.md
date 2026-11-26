@@ -23,6 +23,11 @@
 - **WHEN** 链接带 `cr=A|B`（多厂商，`|` 分隔）或 `pv=A|B`（帕累托图厂商快选集合）
 - **THEN** 厂商筛选与图上快选按集合恢复，命中为并集；`cr` 为无分隔符单值的旧链接按单厂商解码；`pv` 为空集合时不写入链接，解码时空段与重复项被清洗
 
+#### Scenario: 六榜评分来源组合可分享
+
+- **WHEN** 链接带 `cm`，其值是 AA、Vals、LiveBench、Arena、ModelDial、SuperCLUE 中至少两个来源组成的规范顺序组合
+- **THEN** 链接恢复相同来源组合；未知来源、重复来源、单来源或非规范顺序组合被丢弃
+
 #### Scenario: 搜索词条多选 chip 编码
 
 - **WHEN** 链接带 `q=A|B`、`pq=A|B` 或 `rq=A|B`（多搜索 chip，`|` 分隔）
@@ -39,6 +44,11 @@
 
 - **WHEN** 查询串包含过时评分参数、未知枚举或非有限预算
 - **THEN** 对应项回落默认值，页面正常渲染
+
+#### Scenario: 成本分享保留单次任务范围
+
+- **WHEN** `cs` 或 `bs` 指定成本来源
+- **THEN** `cs` 只接受综合成本、AA、Vals、LiveBench；`bs` 只接受不限制、AA、Vals、LiveBench；ModelDial 的整轮评测费用、Arena 与 SuperCLUE 不能作为单次任务成本或预算来源
 
 #### Scenario: Arena 视图可分享而成本不可
 

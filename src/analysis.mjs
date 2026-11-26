@@ -1,6 +1,7 @@
 import {
   SCORE_SOURCES,
   COST_SOURCES,
+  COST_CURRENCY,
   SOURCE_NAMES,
 } from "../shared/sources.mjs";
 export { COST_SOURCES } from "../shared/sources.mjs";
@@ -124,6 +125,7 @@ export function combinedCost(model, profile, minSources = 3) {
       baseline,
       ratio: cost > 0 && baseline > 0 ? cost / baseline : null,
       estimated: !!r?.estimated,
+      currency: COST_CURRENCY[source] ?? "USD",
     };
   });
   const available = components.filter(
@@ -611,7 +613,7 @@ export function csvExport(rows, meta = {}) {
         r.representatives.arena?.publishedAt,
         dataTime,
         scope,
-        `五榜多数对决 Bradley-Terry MAP（Gamma(2,1) 先验，平局半胜；PK主积分为 Elo 尺度，主榜至少 ${minOpponents} 个有效对手，位次均值仅同分排序）`,
+        `${SCORE_SOURCES.length} 榜多数对决 Bradley-Terry MAP（Gamma(2,1) 先验，平局半胜；PK主积分为 Elo 尺度，主榜至少 ${minOpponents} 个有效对手，位次均值仅同分排序）`,
         r.record?.wins,
         r.record?.draws,
         r.record?.losses,

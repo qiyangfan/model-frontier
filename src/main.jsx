@@ -1,4 +1,8 @@
-import { COST_SOURCES } from "../shared/sources.mjs";
+import {
+  COST_SOURCES,
+  SCORE_SOURCES,
+  SINGLE_COST_SOURCES,
+} from "../shared/sources.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -43,9 +47,11 @@ import Chart from "./Chart.jsx";
 import {
   NAMES,
   COSTS,
+  MODELDIAL_COST_LABEL,
   colorFor,
   costFormat,
   money,
+  moneyIn,
   formatTime,
   isDomesticCreator,
 } from "./presentation.mjs";
@@ -531,7 +537,7 @@ function App() {
   // 导出附带数据时间与评分口径，保证日后可复核同一结论。
   const scopeLabel = useMemo(() => {
     const parts = [
-      `五榜多数对决 Bradley-Terry（主榜至少 ${analysis.requiredOpponents} 个有效对手，位次均值仅同分排序）`,
+      `${SCORE_SOURCES.length} 榜多数对决 Bradley-Terry（主榜至少 ${analysis.requiredOpponents} 个有效对手，位次均值仅同分排序）`,
       `至少 ${analysis.required} 榜`,
     ];
     if (excludeStale) parts.push("排除过期 / 失败缓存");
@@ -788,7 +794,7 @@ function App() {
               }
             >
               <small className="block text-[9px] text-[#98aaa3] font-normal mt-[4px] cursor-help">
-                {r.costCoverage}/3 价格来源{" "}
+                {r.costCoverage}/{COST_SOURCES.length} 价格来源{" "}
                 <InfoCircleOutlined aria-hidden="true" />
               </small>
             </Tooltip>
@@ -849,7 +855,7 @@ function App() {
         <SettingOutlined aria-hidden="true" />
       </div>
       <p className="control-help text-[11px] leading-[1.9] max-760:col-span-full">
-        PK 多数对决：AA、Vals、LiveBench、Arena
+        PK 多数对决：AA、Vals、LiveBench、Arena、ModelDial、SuperCLUE
         各一票；至少两榜准入，双方共同有效榜单不足两个不比赛；主榜还要求至少{" "}
         {analysis.requiredOpponents} 个有效对手。有效对局拟合 Bradley-Terry
         强度并以 Elo
@@ -871,7 +877,7 @@ function App() {
       />
       {costSource === "composite" && (
         <p className="control-help text-[10px] leading-[1.85] text-[#8a9aa4] mt-0 mb-[17px] max-760:col-span-full max-760:mt-[2px] max-760:mb-[10px] max-760:text-[9px]">
-          综合指数至少需 2 个成本来源；每个模型标明 2/3 或 3/3。
+          综合指数至少需 2 个成本来源；每个模型标明可用来源占比。
         </p>
       )}
       <div className="h-[1px] bg-[#e9eef2] mt-[17px] mb-[20px] max-760:my-[6px] max-760:col-span-full" />
@@ -889,7 +895,7 @@ function App() {
           }}
           options={[
             { value: "none", label: "不限制" },
-            ...COST_SOURCES.map((value) => ({
+            ...SINGLE_COST_SOURCES.map((value) => ({
               value,
               label: NAMES[value],
             })),
@@ -992,10 +998,10 @@ function App() {
         <div className="page-heading">
           <div>
             <div className="eyebrow">
-              AA / VALS / LIVEBENCH / ARENA / MODELDIAL
+              {SCORE_SOURCES.map((s) => s.toUpperCase()).join(" / ")}
             </div>
             <h1 className="text-[29px] leading-[1.4] font-[650] tracking-[-0.035em] my-[10px] max-1180:text-[26px] max-760:text-[23px] max-760:leading-[1.5]">
-              五榜融合，全面认识一个模型
+              六榜融合，全面认识一个模型
             </h1>
             <p className="text-[12px] leading-[1.8] text-[#657e8d] m-0 max-760:text-[11px] max-760:leading-[1.9]">
               综合排行、单榜证据、模型对比与成本前沿。持续发现新模型，重点关注开放权重。
@@ -1107,7 +1113,7 @@ function App() {
               aria-hidden="true"
             />
             <small className="block text-[11px] text-[#718592] max-760:text-[10px]">
-              五榜共同覆盖
+              六榜共同覆盖
             </small>
             <strong className="block text-[31px] font-semibold tracking-[-0.045em] leading-[1.65] tabular-nums text-green max-760:text-[28px] max-760:leading-[1.7]">
               {evaluationModels.filter((m) =>
@@ -1161,7 +1167,7 @@ function App() {
         <div className="scoring-context">
           <span className="flex items-center gap-[8px] flex-wrap">
             <SettingOutlined aria-hidden="true" /> PK 主积分 · BT / Elo ·
-            五榜各一票 · 至少 {analysis.required} 榜 · 至少{" "}
+            六榜各一票 · 至少 {analysis.required} 榜 · 至少{" "}
             {analysis.requiredOpponents} 个有效对手
             {excludeStale ? " · 排除过期缓存" : ""}
           </span>
@@ -1177,7 +1183,7 @@ function App() {
             title={`对局图分为 ${analysis.btComponents} 个互不相连的组，无法给出单一全局 BT 排名；主榜、对比与前沿暂不可用。请检查来源覆盖或质量排除设置，不回退到旧公式。`}
           />
         )}
-        {excludeStale && activeCostSources.length < 3 && (
+        {excludeStale && activeCostSources.length < COST_SOURCES.length && (
           <Alert
             className="notice"
             type="info"
@@ -1506,7 +1512,7 @@ function App() {
           </>
         )}
         <footer className="flex justify-between gap-[20px] pt-[25px] pb-[28px] text-[#a0adb5] text-[9px] leading-[1.9] tracking-[0.025em] max-760:flex-col max-760:gap-[7px] max-760:py-[23px] max-760:text-[8px]">
-          <span>MODEL ATLAS / 五榜融合工作台</span>
+          <span>MODEL ATLAS / 六榜融合工作台</span>
           <span>
             数据最后刷新尝试：{formatTime(data?.lastRefresh)}
             　·　模型族级比较，跨站配置不完全相同
@@ -1685,9 +1691,12 @@ function App() {
                 综合成本的可复算明细
               </h3>
               <p className="text-[11px] leading-[1.9] text-[#81949d] [overflow-wrap:anywhere]">
-                完整三源时，指数 = 100 × ∛[(AA / AA 中位数) × (Vals / Vals
-                中位数) × (LiveBench / LiveBench
-                中位数)]。缺一源时，对两个有效比值取平方根；至少需两源。已有成本来源等权，与能力权重独立；主动排除来源时，基准按剩余至少两源的共同样本重算。不同基准的倍数不可直接比较。部分覆盖并非等价实验。
+                完整四源时，指数 = 100 × 四次方根[(AA / AA 中位数) × (Vals /
+                Vals 中位数) × (LiveBench / LiveBench 中位数) × (ModelDial /
+                ModelDial
+                中位数)]。缺源时，对有效比值取相应次方根；至少需两源。已有成本来源等权，与能力权重独立。ModelDial
+                提供{MODELDIAL_COST_LABEL}
+                。主动排除来源时，基准按剩余至少两源的共同样本重算。不同基准的倍数不可直接比较。部分覆盖并非等价实验。
               </p>
               <table className="w-full border-collapse text-[10px] mt-[12px] tabular-nums max-760:text-[9px]">
                 <thead>
@@ -1696,7 +1705,7 @@ function App() {
                       来源
                     </th>
                     <th className="text-left py-[11px] px-[8px] border-b border-[#edf1f4] bg-[#f6f9fb] font-medium text-[#8197a4] max-760:py-[10px] max-760:px-[5px]">
-                      原始任务成本
+                      原始成本（美元）
                     </th>
                     <th className="text-left py-[11px] px-[8px] border-b border-[#edf1f4] bg-[#f6f9fb] font-medium text-[#8197a4] max-760:py-[10px] max-760:px-[5px]">
                       基准中位数
@@ -1713,10 +1722,10 @@ function App() {
                         {NAMES[c.source]}
                       </td>
                       <td className="text-left py-[11px] px-[8px] border-b border-[#edf1f4] text-[#63818f] max-760:py-[10px] max-760:px-[5px]">
-                        {money(c.cost)}
+                        {moneyIn(c.cost, c.currency)}
                       </td>
                       <td className="text-left py-[11px] px-[8px] border-b border-[#edf1f4] text-[#63818f] max-760:py-[10px] max-760:px-[5px]">
-                        {money(c.baseline)}
+                        {moneyIn(c.baseline, c.currency)}
                       </td>
                       <td className="text-left py-[11px] px-[8px] border-b border-[#edf1f4] text-[#63818f] max-760:py-[10px] max-760:px-[5px]">
                         {c.ratio == null ? "缺失" : c.ratio.toFixed(3) + "×"}
@@ -1731,7 +1740,7 @@ function App() {
               <p className="text-[11px] leading-[1.9] text-[#81949d] [overflow-wrap:anywhere]">
                 以下单榜核对独立于综合质量排除开关；原始记录保留，不代表仍参与当前综合计算。
               </p>
-              {COST_SOURCES.map((source) => {
+              {SINGLE_COST_SOURCES.map((source) => {
                 const a = sourceAudit(data?.models ?? [], current.id, source);
                 return (
                   <div
@@ -1814,7 +1823,8 @@ function App() {
                     </p>
                     {s === "arena" && <ArenaEvidence record={r} />}
                     <p className="text-[11px] leading-[1.9] text-[#81949d] [overflow-wrap:anywhere]">
-                      任务成本 {money(r.costTask)} · 输入 / 输出
+                      {s === "modeldial" ? MODELDIAL_COST_LABEL : "任务成本"}{" "}
+                      {money(r.costTask)} · 输入 / 输出
                       {s === "vals" ? "参考单价" : "单价"} {money(r.priceInput)}{" "}
                       / {money(r.priceOutput)} 每百万 token
                       {s === "vals" && r.priceUrl && (
@@ -1874,14 +1884,14 @@ function App() {
             如何确定每榜票数？
           </h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            采用多数对决，五榜各一票，不提供任意权重推荐。所有页面和分享链接统一使用当前规则。
+            采用多数对决，六榜各一票，不提供任意权重推荐。所有页面和分享链接统一使用当前规则。
           </p>
           <h3 className="text-[15px] text-[#3d5a68] mt-[24px]">
             如何计算 PK 主积分？
           </h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            默认至少两榜准入。每对模型共同有效榜单不少于两榜才比赛，每榜一票；领先榜数多者胜，相同则平局，五榜
-            2∶2 时该场判平。把所有有效对局交给 Bradley-Terry
+            默认至少两榜准入。每对模型共同有效榜单不少于两榜才比赛，每榜一票；领先榜数多者胜，相同则平局，六榜
+            3∶3 时该场判平。把所有有效对局交给 Bradley-Terry
             模型（平局半胜、Gamma(2,1) 弱先验）拟合相对强度，再以 Elo
             尺度展示：中位模型 1000，400 分差约等于 10∶1
             预测胜率。主榜还要求至少 {analysis.requiredOpponents}{" "}
@@ -1893,7 +1903,7 @@ function App() {
             Copeland 胜率（100 ×（胜场 + 0.5 × 平场）÷
             实际对手数）和名次只作为诊断保留在模型对比与
             CSV，不进入主榜、前沿、同分排序或分享参数。BT
-            主积分相同才按已有榜单排名百分位的等权平均排序；位次均值只作同分排序，不作为第五票，也不与主分再次合并。不足两榜的模型仍展示原始分，但不参加正式排名或前沿。对手集合可能不同，等级分的可比性弱于完整五榜样本；对比页展示共同榜数、票数、原始分与分差。位次均值不参与帕累托纵轴或支配判断。
+            主积分相同才按已有榜单排名百分位的等权平均排序；位次均值只作同分排序，不作为额外一票，也不与主分再次合并。不足两榜的模型仍展示原始分，但不参加正式排名或前沿。对手集合可能不同，等级分的可比性弱于完整六榜样本；对比页展示共同榜数、票数、原始分与分差。位次均值不参与帕累托纵轴或支配判断。
           </p>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
             帕累托搜索只标注图中命中点并保留全部点位；厂商、文本和前沿条件只过滤下方模型表；预算只改变显示，成本切换不改变积分。过期或失败缓存排除开关会改变参赛样本，因此会重算积分。
@@ -1902,17 +1912,18 @@ function App() {
             为何更关注开放权重？
           </h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            全量发现四站模型，按源站披露开放状态识别，未设置中国厂商或模型白名单。既显示全球前沿，也显示仅在开放权重模型中计算的前沿，防止闭源最强模型遮住可部署候选。只看开放权重时，全球参照前沿保持原定义。
+            全量发现六站模型，按源站披露开放状态识别，未设置中国厂商或模型白名单。既显示全球前沿，也显示仅在开放权重模型中计算的前沿，防止闭源最强模型遮住可部署候选。只看开放权重时，全球参照前沿保持原定义。
           </p>
           <h3 className="text-[15px] text-[#3d5a68] mt-[24px]">成本与前沿</h3>
           <p className="text-[12px] leading-[1.95] text-[#78909d] [overflow-wrap:anywhere]">
-            默认使用综合相对成本指数：以三站都有正任务成本的实测模型样本为成本基准，各站成本除以该站中位数，再取三源等权几何平均并乘
-            100。三源权重各
-            1/3，与能力权重独立；页面以基准的多少倍展示（原指数除以
-            100），无美元单位，不能作为生产账单预算。成本至少两源才计算；缺失不补值，对已有来源等权平均对数比值，并标记
-            2/3 或
-            3/3。基准默认用三源完整样本固定计算；主动排除整个来源时，按剩余至少两源的共同样本重新建立基准。详情提供每站原始成本、中位数与相对倍数。也可切换单站的每次任务美元成本。AA、Vals、LiveBench
-            任务分布不同，所以成本切换可能改变前沿。API
+            默认使用综合相对成本指数：以四站都有有效正成本的模型为成本基准，各站成本除以该站中位数，再取四源等权几何平均并乘
+            100。四源（AA、Vals、LiveBench、ModelDial）权重各
+            1/4，与能力权重独立。ModelDial 提供{MODELDIAL_COST_LABEL}
+            。页面以基准的多少倍展示（原指数除以
+            100），无美元单位，不能作为生产账单预算。成本至少两源才计算；缺失不补值，对已有来源等权平均对数比值，并标记可用源数（如
+            2/4）。基准默认用四源完整样本固定计算；主动排除整个来源时，按剩余至少两源的共同样本重新建立基准。详情提供每站原始成本、中位数与相对倍数。单站成本视图和预算筛选提供
+            AA、Vals、LiveBench
+            的每次任务美元成本。各站任务分布不同，所以成本切换可能改变前沿。API
             任务成本不能替代本地部署的
             GPU、运维和利用率成本。成本缺失、非正或低于显示精度不填零，也不放入对数轴。
           </p>

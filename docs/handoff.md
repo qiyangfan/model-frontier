@@ -1,8 +1,18 @@
 # Handoff
 
-最后更新：2026-11-25。**最新一轮：退役无效「允许 AA 估算」「排除历史配置」开关，仅保留「排除过期 / 失败缓存」。** 以下"最新一轮"优先于后面的历史记录。
+最后更新：2026-11-26。**最新一轮完成：SuperCLUE 成为第六评分来源，ModelDial 成为第四个综合成本来源（ADR-0028/0029）。** 以下历史记录保留决策背景；本节记录当前行为。
 
-## 最新一轮：退役死质量开关（2026-11-25 第四轮）
+## 最新一轮：SuperCLUE 第六评分来源与四源综合成本（2026-11-26）
+
+- **当前规则**：评分来源为 AA、Vals、LiveBench、Arena、ModelDial、SuperCLUE，六榜各一票，双方至少共有两榜才比赛。综合成本使用 AA、Vals、LiveBench、ModelDial；ModelDial 成本是最高分完整配置的整轮后端评测美元估算费用。每次任务成本和预算筛选仍只使用 AA、Vals、LiveBench。SuperCLUE 成本不进入综合成本。
+- **来源接入**：SuperCLUE 适配器只读取月度通用榜文件中的「模型名称」和「总分」，当月文件不可用时回退上一月；缺列、坏分数和异常载荷均明确报错。身份继续按现有 `familyKey` 规则归一，不增加人工别名。
+- **决策依据**：SuperCLUE 定位为中文模型补充票；实测加入后有排名模型 61→65、推翻旧裁决 0 场、打破平局 9 场。ModelDial 成本按预先确定的偏差和排序一致性门槛复测后通过；SuperCLUE 成本未通过排序一致性门槛，继续排除。完整证据见 [ADR-0028](adr/0028-SuperCLUE-成为第六评分来源.md)、[ADR-0029](adr/0029-ModelDial-进入成本来源与成本候选实证门槛.md) 与 [source assessment](source-assessment.md)。
+- **实现与规格**：代码、夹具、浏览器测试和说明已同步；当前行为已并入 `openspec/specs/ranking/spec.md` 与 `openspec/specs/share-link/spec.md`，提案已归档至 `openspec/archive/2026-11-26-superclue-sixth-vote-modeldial-cost/`。
+- **验证**：覆盖率测试 186/186，行覆盖率 98.62%、分支覆盖率 91.03%、函数覆盖率 96.79%；代码检查、样式检查、格式检查、构建和三套固定数据浏览器测试均通过。构建有资源包超过 500 KB 的提醒，不影响构建。
+- **本机数据**：2026-11-26 重启 4317 后，`/api/status` 中 AA、Vals、LiveBench、Arena、ModelDial、SuperCLUE 均为 `success`。服务已启动并保持运行。
+- **未决事项**：SuperCLUE 站方实际换月日期会变化，无法预先固定；当月失败回退上一月的行为已由测试覆盖，不影响当前完成状态。
+
+## 上一轮：退役死质量开关（2026-11-25 第四轮）
 
 - **背景与决策**：经核查，AA 回归内联 `initialModels`（ADR-0027）后五源均无 `estimated` 字段（0/290），且 766 条历史档案下线后当前内联 290 条 `deprecated` 全为 `false`；同时 `shared/representatives.mjs` 本就按 `!deprecated` 优先选取，仅「排除过期 / 失败缓存」（`excludeStale`）在刷新失败或超 24 小时时真实生效。按「不留存永不触发的假控件、不为想象的将来预建死分支」原则，直接删除前两套开关与参数，不采用条件隐藏。
 - **改动**：

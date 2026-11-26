@@ -25,7 +25,7 @@ ModelDial 是五个来源里**唯一**有独立后端轴和独立可维护性轴
 ## 决策
 
 1. **`SCORE_SOURCES` 增加 `modeldial`，成为第五票。** 每对模型共同有效榜单不少于两榜才比赛、每榜一票的 ADR-0011 机制原样沿用，不改任何权重——新增的只是一次独立测量。
-2. **ModelDial 不进 `COST_SOURCES`。** 其成本口径是「跑 ModelDial 自己那套私有题库要花多少钱」（版本化 `pricingSnapshotId`），与另三源的「干一个任务花多少钱」不是同一单位语义，混进几何平均会污染成本轴。ADR-0017 已确认成本轴用三源几何平均，此处不扩。
+2. **ModelDial 不进 `COST_SOURCES`。** 其成本是「跑完它自己那套题库的整包开销」：coding 榜只有 5 道大题（每道 max_score 20，跑完一套 elapsed 中位 903 秒），站点口径 `cost_reference.kind = adopted_suite_reference`（「采纳的整套参考」），中位 22.30 美元、最高 462.20 美元；另三源是「一个任务的单价」（AA 中位 2.06、Vals 3.72、LiveBench 0.737 美元），单模型运行次数约 2500 次，相差约 500 倍。归一化（除各源中位数）能吃掉常数倍差，吃不掉计量单位不同；且分母不固定（128 个配置中 127 个跑 5 题、73 个只保留 4 题计分）。**题目私有不是理由**——经横向核实，AA 的 Intelligence Index v5.0.2 有 45% 权重是私有题（AA-Briefcase / AutomationBench-AA / FrontierCode-AA / CritPt v2 Hard Subset），Vals 的计分 Test Set 始终私有，三家私有均为防数据污染、属优点。详见 `docs/source-assessment.md`「题目来源与成本口径横向核实（2026-11-25）」。ADR-0017 已确认成本轴用三源几何平均，此处不扩。
 3. **适配器只取 Coding 榜，且取站点声明的「每个模型默认取最高分的完整配置」。** Text 榜（中文写作专项，与项目通用选型目标不同题）与 Harness 榜（排 harness 工具不排模型，且无结构化端点、只能解析 HTML）均不接入。
 4. **总分自算，不取站点的 `overall_score` 字段。** 站点 `snapshot.entries` 的五轴分是扁平的 `${axis}_score`，`qualityScores.weights` 给出权重（backend 30 / frontend 15 / knowledge 25 / aesthetic 15 / maintainability 15），加权和即站点展示的 Overall。已用 120/120 条有站点总分的条目反算验证：中位差 0.003 分、P90 0.005 分、最大 0.29 分（仅 1 条超 0.1）。自算而非直读，是为了权重一旦变化能被明确发现（`weights` 为空或总和为 0 直接报错），而不是静默用旧口径。
 5. **三类条目必须剔除**：站点自己标为未发布的 `hiddenModelIds`（9 个 id，命中 14 条快照条目）；`product_kind === "bot"` 的外部产品评测（2 条，评测对象是产品不是模型）；被 `listing_replaces` 顶掉的旧 route（站点用该字段声明「本条顶掉那条」，要剔的是被顶掉的那条）。
@@ -84,3 +84,7 @@ owner 授权用五榜数据重校，原话：「可能变 10，也可能变 20�
 - **数据纪律**：`data/snapshot.json` 的 `sources` 新增 `modeldial` 键；`tests/store.test.mjs` 的键集合断言、`tests/majority.test.mjs` 的夹具、`tests/analysis.test.mjs` 的罚分用例随罚分移除一并删除。所有来源数量都改为从 `SCORE_SOURCES` 派生，不再硬编码——下次加票不必回来逐个改数字。
 - **新增测试**：`tests/adapters.test.mjs` 覆盖 ModelDial 五轴加权自算、每模型取最高分配置、未发布模型与 bot 剔除、`listing_replaces` 语义（顶掉的是被声明的那条，不是声明的这条）、轴分非数字时整条剔除而非按 0 收、权重缺失/为零/结构漂移报错。
 - **已知局限**：ModelDial 的 `aesthetic` 轴（15%）测界面美观，对「全栈开发」视角是偏靶轴。本 ADR 不为此重设权重（自设权重即不可审计），该信号以原始五轴之一的形式进入投票，与其他四票同权。若将来要收窄，须另立 ADR。
+
+## 修订记录
+
+- **2026-11-26：决策第 2 条（成本不进 `COST_SOURCES`）被实证复核推翻**，ModelDial 成本以第四源身份进入几何平均，见 [ADR-0029](0029-ModelDial-进入成本来源与成本候选实证门槛.md)。「题量 5 vs 约 2500 没有平均效应」的理论依据不成立——平均化的单位是任务内部成百上千次 API 调用而非题数，其相对成本与在籍三源的一致性（ρ 0.80–0.92）反而优于在籍成员彼此（0.71–0.88）。本 ADR 其余内容（评分票、适配器规则、缺榜罚分移除）不受影响。

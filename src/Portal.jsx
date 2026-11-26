@@ -23,12 +23,14 @@ import {
 import {
   NAMES,
   COSTS,
+  MODELDIAL_COST_LABEL,
   colorFor,
   costFormat,
   money,
   valueFilterPredicate,
   isDomesticCreator,
 } from "./presentation.mjs";
+import { SCORE_SOURCES } from "../shared/sources.mjs";
 import {
   adjustedScores,
   certifyNoBrainer,
@@ -65,13 +67,14 @@ import {
 } from "./Evidence.jsx";
 import { sourceHealth } from "./evidence.mjs";
 const number = (v) => (Number.isFinite(v) ? v.toFixed(1) : "未披露");
-// 五来源徽标配色与缩写（原 .source-aa/.source-vals/.source-livebench，键与 SOURCE_IDS 对应）
+// 来源徽标配色与缩写（原 .source-aa/.source-vals/.source-livebench，键与来源 id 对应）
 const SOURCE_TONE = {
   aa: "bg-[#e7eef9] text-[#416795]",
   vals: "bg-[#eeeaf7] text-[#7e60a7]",
   livebench: "bg-[#e5f3ef] text-[#137964]",
   arena: "bg-[#f2eafa] text-[#76559a]",
   modeldial: "bg-[#fbf0e4] text-[#9a5c1d]",
+  superclue: "bg-[#eef3e6] text-[#5a7a1f]",
 };
 const SOURCE_SYMBOL = {
   aa: "AA",
@@ -79,6 +82,14 @@ const SOURCE_SYMBOL = {
   livebench: "LB",
   arena: "AR",
   modeldial: "MD",
+  superclue: "SC",
+};
+const NATIVE_SOURCE_DESCRIPTIONS = {
+  arena:
+    "文本总榜原始偏好评分；票数、区间与发布日期直接来自源站，不是融合置信度。该来源不提供任务成本。",
+  livebench:
+    "分类分数的等权均分与原生任务成本；源站 Overall 可能采用不同权重。",
+  modeldial: `的原始总分与${MODELDIAL_COST_LABEL}。`,
 };
 const stateTag = (r) => (
   <Tag color={r.openWeights === true ? "green" : "default"}>
@@ -954,7 +965,7 @@ export function Rankings({
           ...[
             {
               title: (
-                <Tooltip title="各有效评分来源在当前样本内的排名百分位等权平均。它来自与 PK 主积分相同的来源数据，只在 PK 同分时排序；不作为第五票，不与 PK 主积分合并，也不参与帕累托判断。">
+                <Tooltip title="各有效评分来源在当前样本内的排名百分位等权平均。它来自与 PK 主积分相同的来源数据，只在 PK 同分时排序；不作为额外一票，不与 PK 主积分合并，也不参与帕累托判断。">
                   榜单位次均值
                 </Tooltip>
               ),
@@ -1022,7 +1033,7 @@ export function Rankings({
             ),
           },
           {
-            title: "任务成本 USD",
+            title: view === "modeldial" ? MODELDIAL_COST_LABEL : "任务成本 USD",
             dataIndex: "costTask",
             width: 150,
             render: money,
@@ -1077,6 +1088,7 @@ export function Rankings({
                 view === "fusion"
                   ? csvExport(filtered, exportMeta)
                   : nativeCsvExport(filtered, {
+                      source: view,
                       fetchedAt: sources?.[view]?.fetchedAt,
                       sourceDate: sources?.[view]?.sourceDate,
                     }),
@@ -1306,11 +1318,8 @@ export function Rankings({
           {view !== "fusion" && (
             <p className="mt-[8px] mb-0 px-[21px] pt-0 pb-[18px] text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
               {NAMES[view]}{" "}
-              {view === "arena"
-                ? "文本总榜原始偏好评分；票数、区间与发布日期直接来自源站，不是融合置信度。该来源不提供任务成本。"
-                : view === "livebench"
-                  ? "分类分数的等权均分与原生任务成本；源站 Overall 可能采用不同权重。"
-                  : "的原始总分与原生任务成本。不同任务协议和推理配置不能视为统一实验。"}
+              {NATIVE_SOURCE_DESCRIPTIONS[view] ??
+                "的原始总分与原生任务成本。不同任务协议和推理配置不能视为统一实验。"}
             </p>
           )}
           <Table
@@ -1345,7 +1354,7 @@ export function Rankings({
           />
           <p className="mt-[8px] mb-0 px-[21px] pt-0 pb-[18px] text-[11px] leading-[1.9] text-[#627987] max-760:text-[10px]">
             {view === "fusion"
-              ? `PK 主积分来自五榜多数对决的 Bradley-Terry 强度（平局半胜，Gamma(2,1) 弱先验），以 Elo 尺度展示：中位模型 1000，400 分差约等于 10∶1 预测胜率。它是相对强度，不是实测胜率或能力百分比；主榜只给至少 ${analysis.requiredOpponents} 个有效对手的模型名次，低样本模型保留原始战绩但不参与主榜与前沿；对局图不连通时不给出全局名次。榜单位次均值由同一批来源的排名百分位等权平均，只在 PK 同分时排序。现行 Copeland 胜率与名次作为诊断保留在模型对比和 CSV 中，不进入主榜、前沿或分享参数。`
+              ? `PK 主积分来自 ${SCORE_SOURCES.length} 榜多数对决的 Bradley-Terry 强度（平局半胜，Gamma(2,1) 弱先验），以 Elo 尺度展示：中位模型 1000，400 分差约等于 10∶1 预测胜率。它是相对强度，不是实测胜率或能力百分比；主榜只给至少 ${analysis.requiredOpponents} 个有效对手的模型名次，低样本模型保留原始战绩但不参与主榜与前沿；对局图不连通时不给出全局名次。榜单位次均值由同一批来源的排名百分位等权平均，只在 PK 同分时排序。现行 Copeland 胜率与名次作为诊断保留在模型对比和 CSV 中，不进入主榜、前沿或分享参数。`
               : view === "livebench"
                 ? "名次按当前纳入配置的分类等权均分计算，并列同名次；与源站 Overall 排名可能不同。"
                 : "源站名次由当前纳入配置按原始总分计算，并列同名次；不复刻源站的置信区间排名。"}
@@ -1443,8 +1452,10 @@ export function Comparison({
       metric(s + "percentile", `${NAMES[s]} · 排名分`, (r) =>
         r.percentiles[s] == null ? "未参与评分" : number(r.percentiles[s]),
       ),
-      metric(s + "cost", `${NAMES[s]} · USD/任务`, (r) =>
-        money(r.representatives[s]?.costTask),
+      metric(
+        s + "cost",
+        `${NAMES[s]} · ${s === "modeldial" ? MODELDIAL_COST_LABEL : "USD/任务"}`,
+        (r) => money(r.representatives[s]?.costTask),
       ),
       metric(s + "config", `${NAMES[s]} · 配置`, (r) => (
         <span className="text-[11px] leading-[1.8] text-[#5e7783] [overflow-wrap:anywhere]">
@@ -1718,7 +1729,7 @@ export function Comparison({
                   能力、成本与配置明细
                 </h2>
                 <p className="mt-[6px] mb-0 text-[12px] leading-[1.9] text-[#657d8b] max-760:text-[11px]">
-                  不同源的美元任务成本分别展示；不相加，也不折算成统一生产账单。
+                  各来源的美元成本按行列出，评测单位见各行名称。
                 </p>
               </div>
             </div>

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import readXlsxFile from "read-excel-file/node";
 import {
   SOURCE_INFO,
   FETCHERS,
@@ -12,6 +15,9 @@ import {
   parseVals,
   parseLivebench,
   parseModelDial,
+  parseSuperclue,
+  superclueMonthLabel,
+  fetchSuperclue,
 } from "../server/adapters.mjs";
 
 // AA 的内联载荷挂在 Flight 文本分片里；分片是 JS 字符串字面量，引号呈转义形态。
@@ -797,6 +803,7 @@ test("Arena download failures and corrupted files fail clearly instead of invent
 const modelDialDoc = (overrides = {}) => ({
   displayNames: { "anthropic/claude-fable-5.2": "Claude Fable 5.2" },
   hiddenModelIds: ["union-alpha", "qwen4-max-preview"],
+  ...(overrides.metrics ? { metrics: overrides.metrics } : {}),
   qualityScores: {
     weights: {
       backend: 30,
@@ -951,4 +958,154 @@ test("ModelDial: hiddenModelIds 混放两种形态，按 model_id 与 candidate_
     parseModelDial(doc).rows.map((x) => x.name),
     ["Claude Fable 5.2"],
   );
+});
+
+// SuperCLUE：月更公开 xlsx，地址月份写死在站方前端构建产物里且旧月即删。
+// 只读「模型名称/总分」两列——分轴列站方每月可能变更，不是稳定契约（ADR-0028）。
+test("SuperCLUE: 只读模型名称/总分两列，忽略分轴列与补白行", () => {
+  const data = [
+    ["排名", "模型名称", "机构", "总分", "智能体编程", "超长上下文"],
+    ["-", "Gemini-4-Argon", "Google", 73.62, 65.38, 95.63],
+    [1, "Qwen4-Max", "阿里巴巴", 61.61, 57.69, 77.8],
+    [2, "Kimi-K3.1-Pro", "月之暗面", 61.46, 57.69, 87.25],
+    [3, "Hy4", "腾讯", 61.01, 57.69, 88.86],
+    [4, "DeepSeek-V4.1-Flash-1017", "深度求索", 58.95, 65.38, 66.25],
+    [5, "GLM-5.3", "智谱AI", 50.66, 53.85, 77.6],
+    ["-", "Grok-4.7", "xAI", 49.66, 50, 30.17],
+    [6, "GLM-5.3-Flash", "智谱AI", 47.18, 50, 57.61],
+    [7, "Qwen3.8-Max-0902", "阿里巴巴", 43.22, 42.31, 44.38],
+    [8, "MiniMax M3.1-Flash", "稀宇科技", 41.35, 46.15, 51.86],
+    [9, "Step-5-Preview", "阶跃星辰", 41.23, 46.15, 49.39],
+    [10, "MiMo-V2.6-Flash", "小米集团", 36.4, 42.31, 35.74],
+    [null, null, null, null, null, null],
+    [11, "LongCat-2.5-Preview", "美团", 39.59, 42.31, 42.14],
+  ];
+  const r = parseSuperclue(data, "2026年11月");
+  assert.equal(r.rows.length, 13);
+  // 补白行被跳过，前后行原序保留
+  assert.equal(r.rows[2].name, "Kimi-K3.1-Pro");
+  assert.equal(r.rows[12].name, "LongCat-2.5-Preview");
+  assert.deepEqual(r.rows[0], {
+    name: "Gemini-4-Argon",
+    score: 73.62,
+    url: SOURCE_INFO.superclue.url,
+    source: "superclue",
+  });
+  assert.equal(r.sourceDate, "2026-11");
+  assert.equal(r.releaseKey, "2026年11月");
+});
+
+test("SuperCLUE: 表头漂移、缺名缺分与半截载荷必须报错，不静默造数据", () => {
+  assert.throws(
+    () => parseSuperclue([["排名", "模型", "总分"]], "2026年11月"),
+    /表头/,
+  );
+  assert.throws(
+    () =>
+      parseSuperclue(
+        [
+          ["模型名称", "总分"],
+          ["A", "不是数字"],
+        ],
+        "2026年11月",
+      ),
+    /总分不是数字/,
+  );
+  assert.throws(
+    () =>
+      parseSuperclue(
+        [
+          ["模型名称", "总分"],
+          [null, 5],
+        ],
+        "2026年11月",
+      ),
+    /无模型名称/,
+  );
+  // 有效行数低于下限：两列都在但只剩一条，视同半截载荷
+  assert.throws(
+    () =>
+      parseSuperclue(
+        [
+          ["模型名称", "总分"],
+          ["A", 1],
+        ],
+        "2026年11月",
+      ),
+    /半截载荷/,
+  );
+});
+
+test("SuperCLUE: 月份标签与跨年回退", () => {
+  assert.equal(superclueMonthLabel(new Date(2026, 10, 26)), "2026年11月");
+  assert.equal(superclueMonthLabel(new Date(2026, 10, 26), -1), "2026年10月");
+  assert.equal(superclueMonthLabel(new Date(2027, 0, 5), -1), "2026年12月");
+});
+
+test("SuperCLUE: 真实 xlsx 夹具经解析库读到总分列并过解析器", async () => {
+  const sheets = await readXlsxFile(
+    fileURLToPath(new URL("./fixtures/superclue-board.xlsx", import.meta.url)),
+  );
+  const data = sheets.find((s) => s.sheet === "总排行榜")?.data;
+  const r = parseSuperclue(data, "2026年11月");
+  assert.equal(r.rows.length, 14);
+  assert.ok(r.rows.every((row) => row.name && Number.isFinite(row.score)));
+  assert.ok(r.rows.some((row) => row.name === "Gemini-4-Argon"));
+});
+
+test("ModelDial: 成本跟随最高分完整配置的路由，缺失时留空（ADR-0029）", () => {
+  const doc = modelDialDoc({
+    metrics: {
+      "Claude:claude-fable-5.2:xhigh": {
+        backend: { estimated_api_cost_usd: 22.3 },
+      },
+      "Claude:claude-fable-5.2:low": {
+        backend: { estimated_api_cost_usd: 1.2 },
+      },
+    },
+  });
+  const r = parseModelDial(doc);
+  // 取最高分路由（xhigh）的成本，不取最便宜的
+  assert.equal(r.rows[0].costTask, 22.3);
+  // 无 metrics 时成本留空，不造数
+  const bare = parseModelDial(modelDialDoc());
+  assert.equal(bare.rows[0].costTask, null);
+});
+
+test("SuperCLUE: 当月文件未上线时回退上一月，sourceDate 如实记录命中月份", async () => {
+  const realFetch = global.fetch;
+  const requested = [];
+  const fixtureBytes = await readFile(
+    fileURLToPath(new URL("./fixtures/superclue-board.xlsx", import.meta.url)),
+  );
+  // 模拟站方月初尚未部署当月文件：当月 404、上月命中。
+  global.fetch = async (url) => {
+    requested.push(String(url));
+    if (String(url).includes("2027%E5%B9%B41%E6%9C%88"))
+      return {
+        ok: false,
+        status: 404,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () =>
+        fixtureBytes.buffer.slice(
+          fixtureBytes.byteOffset,
+          fixtureBytes.byteOffset + fixtureBytes.byteLength,
+        ),
+    };
+  };
+  try {
+    const r = await fetchSuperclue(new Date(2027, 0, 5));
+    assert.deepEqual(requested.length, 2, "当月与上月各请求一次");
+    assert.match(requested[0], /2027%E5%B9%B41%E6%9C%88/);
+    assert.match(requested[1], /2026%E5%B9%B412%E6%9C%88/);
+    assert.equal(r.sourceDate, "2026-12");
+    assert.equal(r.releaseKey, "2026年12月");
+    assert.ok(r.rows.length >= 12);
+  } finally {
+    global.fetch = realFetch;
+  }
 });

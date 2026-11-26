@@ -1,5 +1,5 @@
 import { rankBy } from "./analysis.mjs";
-import { NAMES } from "./presentation.mjs";
+import { MODELDIAL_COST_LABEL, NAMES } from "./presentation.mjs";
 export const SOURCE_IDS = Object.keys(NAMES);
 
 // AntD 在 descend 时对比较结果取反；缺失值必须在两个方向都排在最后。
@@ -286,7 +286,7 @@ export function nativeCsvExport(rows, meta = {}) {
         "模型配置",
         "厂商",
         "原始总分",
-        "每次任务成本 USD",
+        meta.source === "modeldial" ? MODELDIAL_COST_LABEL : "每次任务成本 USD",
         "输入单价 USD/百万 token",
         "输出单价 USD/百万 token",
         "估算",

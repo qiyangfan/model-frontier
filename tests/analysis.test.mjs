@@ -268,16 +268,35 @@ test("combined cost is normalized geometric mean, not arithmetic USD average", (
       aa: { costTask: 1 },
       vals: { costTask: 10 },
       livebench: { costTask: 100 },
+      modeldial: { costTask: 10 },
     }),
     model("b", {
       aa: { costTask: 2 },
       vals: { costTask: 20 },
       livebench: { costTask: 200 },
+      modeldial: { costTask: 20 },
     }),
   ];
   const p = combinedCostProfile(models);
-  assert.deepEqual(p.medians, { aa: 1.5, vals: 15, livebench: 150 });
-  assert.ok(Math.abs(combinedCost(models[0], p).value - (100 * 2) / 3) < 1e-8);
+  assert.deepEqual(p.medians, {
+    aa: 1.5,
+    vals: 15,
+    livebench: 150,
+    modeldial: 15,
+  });
+  const firstCost = combinedCost(models[0], p);
+  assert.ok(Math.abs(firstCost.value - (100 * 2) / 3) < 1e-8);
+  assert.deepEqual(
+    firstCost.components.find(({ source }) => source === "modeldial"),
+    {
+      source: "modeldial",
+      cost: 10,
+      baseline: 15,
+      ratio: 10 / 15,
+      estimated: false,
+      currency: "USD",
+    },
+  );
   assert.ok(Math.abs(combinedCost(models[1], p).value - (100 * 4) / 3) < 1e-8);
 });
 test("changing a source currency scale does not change combined relative costs", () => {
@@ -286,21 +305,23 @@ test("changing a source currency scale does not change combined relative costs",
       aa: { costTask: 1 },
       vals: { costTask: 20 },
       livebench: { costTask: 3 },
+      modeldial: { costTask: 12 },
     }),
     model("b", {
       aa: { costTask: 2 },
       vals: { costTask: 10 },
       livebench: { costTask: 4 },
+      modeldial: { costTask: 18 },
     }),
   ];
   const b = structuredClone(a);
-  for (const m of b) m.representatives.vals.costTask *= 1000;
+  for (const entry of b) entry.representatives.modeldial.costTask *= 1000;
   const pa = combinedCostProfile(a),
     pb = combinedCostProfile(b);
-  assert.ok(
-    Math.abs(combinedCost(a[0], pa).value - combinedCost(b[0], pb).value) <
-      1e-9,
-  );
+  const originalCost = combinedCost(a[0], pa).value;
+  const scaledCost = combinedCost(b[0], pb).value;
+  assert.ok(Number.isFinite(originalCost) && Number.isFinite(scaledCost));
+  assert.ok(Math.abs(originalCost - scaledCost) < 1e-9);
 });
 test("missing-source costs are not imputed or reweighted into combined cost", () => {
   const a = [
@@ -308,6 +329,7 @@ test("missing-source costs are not imputed or reweighted into combined cost", ()
       aa: { score: 1, costTask: 1 },
       vals: { score: 1, costTask: 2 },
       livebench: { score: 1, costTask: 3 },
+      modeldial: { score: 1, costTask: 4 },
     }),
     model("b", {
       aa: { score: 2, costTask: 1 },
@@ -409,6 +431,7 @@ test("default two-source cost allows a partial geometric mean but marks its cove
       aa: { score: 10, costTask: 2 },
       vals: { score: 10, costTask: 8 },
       livebench: { score: 10, costTask: 32 },
+      modeldial: { score: 10, costTask: 128 },
     }),
     model("two", {
       aa: { score: 20, costTask: 1 },
@@ -660,6 +683,7 @@ test("adjustedScores: 缺榜专项罚分——部分覆盖模型入榜但按缺�
         arena: 72,
         aa: 68,
         modeldial: 69,
+        superclue: 69,
       },
     },
   ];

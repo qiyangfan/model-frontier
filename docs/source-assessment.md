@@ -59,10 +59,67 @@ ModelDial 方法论独立于 Artificial Analysis：自有私有测试集、自�
 
 ## 适配器已定死的规则（ADR-0026）
 
-只取 Coding 榜；同一模型多条 route / candidate_id（27 种 route）按站点声明取最高分的完整配置；`hiddenModelIds` 9 个 id（命中 14 条快照条目）与 `product_kind === "bot"` 的外部产品评测（2 条）剔除；被 `listing_replaces` 顶掉的旧 route 剔除（该字段的语义是「本条顶掉被声明的那条」，要剔的是后者）；成本口径不进 `COST_SOURCES`——它是「跑自家私有套件的参考成本」（版本化 `pricingSnapshotId`），与另三源的「干一个任务花多少钱」不是同一单位语义；总分按 `qualityScores.weights` 五轴加权自算（120 条有站点总分的条目全部对上，中位差 0.003 分、最大 0.29 分），不直读 `overall_score`，以便权重变化能被明确发现。
+只取 Coding 榜；同一模型多条 route / candidate_id（27 种 route）按站点声明取最高分的完整配置；`hiddenModelIds` 9 个 id（命中 14 条快照条目）与 `product_kind === "bot"` 的外部产品评测（2 条）剔除；被 `listing_replaces` 顶掉的旧 route 剔除（该字段的语义是「本条顶掉被声明的那条」，要剔的是后者）；总分按 `qualityScores.weights` 五轴加权自算（120 条有站点总分的条目全部对上，中位差 0.003 分、最大 0.29 分），不直读 `overall_score`，以便权重变化能被明确发现。
+
+**〔2026-11-26 更新：本段结论已被实证复核推翻，ModelDial 成本以第四源身份进入 `COST_SOURCES`，见 [ADR-0029](adr/0029-ModelDial-进入成本来源与成本候选实证门槛.md)；下文保留为历史记录。〕**
+
+**成本不进 `COST_SOURCES`，理由是题量，不是题目私有。** ModelDial 的 `cost_reference.kind` 是 `adopted_suite_reference`（「采纳的整套参考」），中位 $22.30、最高 $462.20，对应 Coding 榜 5 道大题（每道 max_score 20，跑完一套 elapsed 中位 903 秒）；另三源是「一个任务的单价」（AA 中位 $2.06、Vals $3.72、LiveBench $0.737），单模型运行次数约 2500 次，相差约 500 倍。早期曾以「私有题库」为由，经 owner 反问「难道 Arena / LiveBench / AA 不是私有题」后横向核实四源方法页，确认 AA（占其 Intelligence Index v5.0.2 权重 45%）、Vals（计分 Test Set 始终私有）同样大量使用私有题，私有是为防数据污染、属优点而非缺陷，该理由已撤回，详见上一节。ModelDial 站内自维护的帕累托前沿（同题、同 `pricingSnapshotId`、同口径）有效，但它回答「让某模型跑完这套私有测试要花多少钱」，与成本轴的「每美元买多少分」不是同一个问题，中间没有换算公式。
 
 **已知局限**：ModelDial 的 `aesthetic` 轴（15%）测界面美观，对「全栈开发」视角是偏靶轴。本 ADR 不为此重设权重（自设权重即不可审计），该信号以原始五轴之一进入投票，与其他四票同权。若将来要收窄，须另立 ADR。
+
+## 题目来源与成本口径横向核实（2026-11-25）
+
+起因：讨论「ModelDial 成本为何不进 `COST_SOURCES`」时，一度把「私有题库」当作 ModelDial 的排除理由。owner 反问「难道 Arena / LiveBench / AA 不是私有题」，据此对四个在榜来源逐一核实方法页，结论是**该理由不成立，已撤回**。
+
+### 各源题目来源（2026-11-25 实核）
+
+| 来源                | 私有题                                                                                                                                                                                                                               | 公开题                                                                                                                                           | 证据                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Artificial Analysis | **占 Intelligence Index v5.0.2 权重 45%**：AA-Briefcase v1.1（91 tasks × 4 scenarios，15%）、AutomationBench-AA（657 tasks，5%）、FrontierCode-AA 2.0（132 题 × 3 repeats，15%）、CritPt v2 Hard Subset（从 70 题固定选 40 题，10%） | GDP.pdf（100 tasks × 10 domains，5%）、Terminal-Bench 4.1（66 × 3，10%）、Terminal-Bench-Science 0.1（70 × 3，15%）、HLE-Diamond、AA-Omniscience | 方法页评测表设专门 `Private` 列逐项标 ✓/✗；原文「We maintain internal copies of all evaluation datasets」  |
+| Vals                | **Test Set 始终私有**，另有 Private Validation Set                                                                                                                                                                                   | Public Validation Set 完全开放；也自建 harness 跑 Terminal-Bench / SWE-bench / IOI                                                               | 方法页「Public and Private Sets」：私有是为「prevent leakage into the training data of foundation models」 |
+| LiveBench           | 2.0 标语即「contamination-free」，靠持续换题抗污染                                                                                                                                                                                   | 1.0 题目公开                                                                                                                                     | livebench.ai 首页，Release 2026-11-06                                                                      |
+| Arena               | 无预设题库，用户众包现场提问                                                                                                                                                                                                         | —                                                                                                                                                | 见上文 Arena 行                                                                                            |
+| ModelDial           | 私有（数据许可明确「不含题目本身」，文件名 `query-engine-private-r1` / `record-store-private-r1`）                                                                                                                                   | —                                                                                                                                                | 见上文 ModelDial 节                                                                                        |
+
+**结论一：私有题库不是 ModelDial 的特殊性。** AA 是私有题大户（占其指数权重近半），Vals 的计分 Test Set 同样始终私有，三家的私有理由完全一致——防数据污染。私有题库是**优点**（抗污染，LiveBench 靠持续换题才能达到同样效果），不构成任何来源的排除理由。
+
+### 真正的区分点是题量
+
+| 来源                | 单模型评测运行次数（粗算）                                              | 成本口径                                                              |
+| ------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Artificial Analysis | 约 2500+（657 + 91 + 100×5 + 132×3 + 66×3 + 70×3 + 40×3 + …）           | 站点直接提供 `intelligenceIndexCostPerTask`                           |
+| LiveBench           | 多 suite，每 suite 数百题（成本表带 `nq_<suite>` 题数字段）             | 项目自算「总成本 ÷ 总题数」                                           |
+| Vals                | 多 benchmark                                                            | 站点提供                                                              |
+| **ModelDial**       | **5 道题**（128 个配置中 127 个跑 5 题，其中 73 个最终只保留 4 题计分） | 只给整套参考成本 `adopted_suite_reference`，中位 $22.30、最高 $462.20 |
+
+`server/adapters.mjs:541` 的 `const costTask = sumTasks > 0 ? sumCost / sumTasks : null;` 是这节最直接的活证据：**「总成本 ÷ 总题数」这个换算是成立的**，LiveBench 就这么干。它成立的前提是题量大到有平均效应；题量为 5 时，除出来的是「这 5 道题对某个模型的 token 消耗均值」，不是「该模型的每任务价格」——不同模型在这 5 道题上的话多话少差异会被完整放大，且没有平均掉。
+
+AA 站点自行提供 `intelligenceIndexCostPerTask`、ModelDial 只提供整套参考成本而不折算每任务成本，两边站方的选择本身就说明了同一件事：前者认为「每任务价」是可报告的度量，后者不认为。
+
+**〔2026-11-26 更新：「题量无平均效应」论证被实测推翻——平均化单位是任务内部成百上千次 API 调用而非题数，ModelDial 相对成本与在籍三源的一致性（ρ 0.80–0.92）优于在籍成员彼此（0.71–0.88），已进入 `COST_SOURCES`，见 [ADR-0029](adr/0029-ModelDial-进入成本来源与成本候选实证门槛.md)。〕**
+
+**结论二：ModelDial 成本不进 `COST_SOURCES` 的理由是题量（5 题 vs 约 2500 次运行，差约 500 倍）与分母不固定（4 / 5 / 7 题并存），不是题目私有，也不是单位量级（归一化可吃掉常数倍差，吃不掉「一个除的是 5 道重活、一个除的是一个任务」）。** ModelDial 的帕累托前沿在其站内有效（同题、同 `pricingSnapshotId`、同口径），回答的是「让某模型跑完这套私有测试要花多少钱」；本工具成本轴回答「每美元买多少分」，两者不是同一个问题，中间没有换算公式。
 
 ## 若将来重新评估需先解决的问题
 
 模型命名需别名映射（如 `anthropic/claude-sonnet-5.5`、`k3`、`meta/muse-wonder`、`qwen3.8-flash`、`gpt-6.2-astra`、`google/gemini-4-neon`）——ModelDial 用 `model_id` + `candidate_id` 双标识，与现有四源的命名体系不同，`familyKey()` 目前靠显示名归一。
+
+# SuperCLUE 与 maomu.com 调研（2026-11-26，已结案：SuperCLUE 纳入为第六评分来源）
+
+调研对象 https://www.superclueai.com/homepage（owner 提名）与 https://maomu.com/rank/models（owner 补充提名），owner 授权代决（「你来决策吧」）。
+
+## maomu.com：否决，不纳入
+
+页面自述「按 Artificial Analysis 智能指数比较模型」，分数、速度、每任务成本与配置名（max/xhigh with fallback）均为 AA 数据换皮，属二次聚合。命中本文档 2026-10-19 既有规则「同一机构子榜、托管平台和二次聚合不重复计票」（Epoch ECI 先例）——收它等于把 AA 一票暗中数成两票。
+
+## SuperCLUE：纳入为第六评分来源（[ADR-0028](adr/0028-SuperCLUE-成为第六评分来源.md)）
+
+**可获取性**：月更公开 xlsx 两张（通用榜 + 成本表），免登录免密钥；文件地址月份写死在站方前端构建产物（`HomePage-*.js` 内 `N="2026年11月"`），站方每月重部署并删除旧月文件（2026 年 8/9/10 月实测 404），历史由本项目快照自建。分轴列 7 月期与 11 月期已换一轮（数学推理→数理推理、删科学推理/智能体任务规划、增超长上下文），「模型名称/总分」两列稳定——适配器只读这两列。
+
+**覆盖**：21 家（18 国内 + 3 国外参考），六源最小；对本库有排名的 65 模型覆盖 18 家（28%）。Claude 全家缺席、Gemini 4 系仅 Argon、GPT 仅 6.1 Sol——对前沿格局无裁判权；价值定位为国产中档补充票。`familyKey()` 归一 18/21 自动落族（优于 ModelDial 接入时的映射成本），不做人工别名（ADR-0025）。
+
+**注入实验**（2026-11-25 真实快照，仓库管线五票/六票对比）：有排名 61→65（Qwen 3.8 Max 0902 #26、Doubao Seed 2.1 Pro (260915) #38、Hy4 Preview #43、Qwen3.8-Flash #48 四家单源国产模型首次获得名次）；前 7 名不动；对既有裁决同向 80/90（88.9%）、推翻 0、破平票 9、造平票 1（六票 3:3 由辅助分决胜兜底）；Gemini 4 Argon 11→8 为唯一前十变化；性价比榜最大挪 2 位。
+
+**成本表评估（不进 `COST_SOURCES`）**：「平均单题成本」列 20/20 家逐位等于「智能体编程单题成本」——即人民币计价的编程题实测开耗（GPT-6.1 Sol ¥1.13、DeepSeek V4.1 Flash ¥3.08、Grok 4.7 ¥31.5）。按 ADR-0029 固化的实证门槛复测：对在籍三源 MAD 0.94–1.19 倍在门槛内，但对 Vals 秩相关 0.586 < 门槛 0.613（n=15，边界未过），且源内跨维（编程 vs 数理/指令/幻觉/长文，n=20）ρ 仅 0.68–0.79——题目组合敏感的实测证据。维持排除；今后按同判据复测，三对全过即进。其单价表（元/百万 tokens 三档）留作国产模型价格交叉核对材料。
+
+**诚实性披露**：站方对国外模型只给参考分、不参与排名（未披露任何「不同题库」条件），本项目同权投票并在来源说明写明系本项目自行决定；无数据许可声明（与 AA/Vals 现状同级，弱于 ModelDial 的 CC BY 4.0）；provenance 六源最弱（无版本号/批次/评分器版本，仅文件名月份）。
